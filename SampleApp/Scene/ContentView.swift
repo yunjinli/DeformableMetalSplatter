@@ -56,7 +56,7 @@ struct ContentView: View {
 
             Spacer()
 
-            Button("Read Scene File") {
+            Button("Read Scene File / Folder") { // Update label
                 isPickingFile = true
             }
             .padding()
@@ -69,14 +69,16 @@ struct ContentView: View {
                           allowedContentTypes: [
                             UTType(filenameExtension: "ply")!,
                             UTType(filenameExtension: "splat")!,
+                            UTType.folder // <--- ADD THIS
                           ]) {
                 isPickingFile = false
                 switch $0 {
                 case .success(let url):
+                    // Security scoping works for folders too
                     _ = url.startAccessingSecurityScopedResource()
                     Task {
-                        // This is a sample app. In a real app, this should be more tightly scoped, not using a silly timer.
-                        try await Task.sleep(for: .seconds(10))
+                        // Keep access alive longer for folders since we might read large weights
+                        try await Task.sleep(for: .seconds(60))
                         url.stopAccessingSecurityScopedResource()
                     }
                     openWindow(value: ModelIdentifier.gaussianSplat(url))

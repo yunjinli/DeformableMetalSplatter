@@ -31,7 +31,10 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     // Pan xy
     var panX: Float = 0.0
     var panY: Float = 0.0
-
+    
+    // Total length of the video/animation in seconds
+    var animationDuration: Double = 10.0
+    
     var drawableSize: CGSize = .zero
 
     init?(_ metalKitView: MTKView) {
@@ -58,7 +61,15 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                                                 sampleCount: metalKitView.sampleCount,
                                                 maxViewCount: 1,
                                                 maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-            try await splat.read(from: url)
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
+                // It is a directory: Assume Deformable Scene (ply + weights)
+                try await splat.loadDeformableScene(directory: url)
+            } else {
+                // It is a file: Standard Static Scene
+                try await splat.read(from: url)
+            }
+            
             modelRenderer = splat
         case .sampleBox:
             modelRenderer = try! await SampleBoxRenderer(device: device,
@@ -109,6 +120,18 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         let semaphore = inFlightSemaphore
         commandBuffer.addCompletedHandler { (_ commandBuffer)-> Swift.Void in
             semaphore.signal()
+        }
+
+        // Get time
+        let now = Date().timeIntervalSinceReferenceDate
+        
+        // Normalize to [0, 1] with animationDuration
+        let loopedTime = now.remainder(dividingBy: animationDuration)
+        let normalizedTime = Float((loopedTime < 0 ? loopedTime + animationDuration : loopedTime) / animationDuration)
+
+        // deform.step
+        if let splatRenderer = modelRenderer as? SplatRenderer {
+            splatRenderer.update(time: normalizedTime, commandBuffer: commandBuffer)
         }
 
         do {

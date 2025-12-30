@@ -16,7 +16,7 @@ struct MetalKitSceneView: ViewRepresentable {
         var renderer: MetalKitSceneRenderer?
         var startCameraDistance: Float = 0.0
         
-        
+#if os(iOS)
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             guard let renderer = renderer else { return }
             
@@ -52,6 +52,7 @@ struct MetalKitSceneView: ViewRepresentable {
                 renderer.cameraDistance = min(max(newDistance, -20.0), -0.5)
             }
         }
+#endif
     }
 
     func makeCoordinator() -> Coordinator {
@@ -59,28 +60,81 @@ struct MetalKitSceneView: ViewRepresentable {
     }
 
 #if os(macOS)
-    func makeNSView(context: NSViewRepresentableContext<MetalKitSceneView>) -> MTKView {
-        makeView(context.coordinator)
-    }
-#elseif os(iOS)
-    func makeUIView(context: UIViewRepresentableContext<MetalKitSceneView>) -> MTKView {
-        let metalKitView = makeView(context.coordinator)
+    func makeNSView(context: Context) -> MTKView {
+        // Use a custom subclass to capture mouse events
+        let metalKitView = InteractiveMTKView()
         
-        // Add Gesture Recognizer
-        let panGesture = UIPanGestureRecognizer(target: context.coordinator,
-                                                action: #selector(Coordinator.handlePan(_:)))
-        let pinchGesture = UIPinchGestureRecognizer(target: context.coordinator,
-                                                action: #selector(Coordinator.handlePinch(_:)))
-        panGesture.minimumNumberOfTouches = 1
-        panGesture.maximumNumberOfTouches = 2
-        metalKitView.addGestureRecognizer(panGesture)
-        metalKitView.addGestureRecognizer(pinchGesture)
+        if let metalDevice = MTLCreateSystemDefaultDevice() {
+            metalKitView.device = metalDevice
+        }
+
+        let renderer = MetalKitSceneRenderer(metalKitView)
+        context.coordinator.renderer = renderer
+        metalKitView.delegate = renderer
         
+        // Link the view back to the renderer for input handling
+        metalKitView.renderer = renderer
+
+        loadModel(renderer)
+
         return metalKitView
     }
-#endif
 
-    private func makeView(_ coordinator: Coordinator) -> MTKView {
+    func updateNSView(_ view: MTKView, context: Context) {
+        updateView(context.coordinator)
+    }
+    
+    // Custom MTKView subclass to handle Mouse/Trackpad events
+    class InteractiveMTKView: MTKView {
+        weak var renderer: MetalKitSceneRenderer?
+        
+        override var acceptsFirstResponder: Bool { true }
+        
+        // Orbit: Left Mouse Drag
+        override func mouseDragged(with event: NSEvent) {
+            guard let renderer = renderer else { return }
+            let sensitivity: Float = 0.01
+            renderer.yaw += Float(event.deltaX) * sensitivity
+            renderer.pitch += Float(event.deltaY) * sensitivity
+        }
+        
+        // Pan: Right Mouse Drag (or Control + Click Drag)
+        override func rightMouseDragged(with event: NSEvent) {
+            guard let renderer = renderer else { return }
+            let panSensitivity: Float = 0.005
+            renderer.panX += Float(event.deltaX) * panSensitivity
+            renderer.panY -= Float(event.deltaY) * panSensitivity
+        }
+        
+        // Pan alternative: Other Mouse Drag (Middle click)
+        override func otherMouseDragged(with event: NSEvent) {
+            rightMouseDragged(with: event)
+        }
+        
+        // Zoom: Scroll Wheel
+        override func scrollWheel(with event: NSEvent) {
+            guard let renderer = renderer else { return }
+            let scrollSensitivity: Float = 0.5
+            // Note: deltaY is usually inverse to distance expectation on scroll
+            renderer.cameraDistance += Float(event.deltaY) * scrollSensitivity
+            renderer.cameraDistance = min(max(renderer.cameraDistance, -20.0), -0.5)
+        }
+        
+        // Zoom: Pinch Gesture on Trackpad
+        override func magnify(with event: NSEvent) {
+            guard let renderer = renderer else { return }
+            // Magnification is a scale factor (e.g. 1.0 + magnification)
+            // We adjust distance inversely to scale
+            let scale = Float(1.0 + event.magnification)
+            if scale > 0 {
+                renderer.cameraDistance /= scale
+                renderer.cameraDistance = min(max(renderer.cameraDistance, -20.0), -0.5)
+            }
+        }
+    }
+#endif
+#if os(iOS)
+    func makeUIView(context: UIViewRepresentableContext<MetalKitSceneView>) -> MTKView {
         let metalKitView = MTKView()
 
         if let metalDevice = MTLCreateSystemDefaultDevice() {
@@ -88,9 +142,28 @@ struct MetalKitSceneView: ViewRepresentable {
         }
 
         let renderer = MetalKitSceneRenderer(metalKitView)
-        coordinator.renderer = renderer
+        context.coordinator.renderer = renderer
         metalKitView.delegate = renderer
 
+        // Add Gesture Recognizers
+        let panGesture = UIPanGestureRecognizer(target: context.coordinator,
+                                                action: #selector(Coordinator.handlePan(_:)))
+        let pinchGesture = UIPinchGestureRecognizer(target: context.coordinator,
+                                                    action: #selector(Coordinator.handlePinch(_:)))
+        panGesture.minimumNumberOfTouches = 1
+        panGesture.maximumNumberOfTouches = 2
+        metalKitView.addGestureRecognizer(panGesture)
+        metalKitView.addGestureRecognizer(pinchGesture)
+
+        loadModel(renderer)
+        
+        return metalKitView
+    }
+    func updateUIView(_ view: MTKView, context: Context) {
+        updateView(context.coordinator)
+    }
+#endif
+    private func loadModel(_ renderer: MetalKitSceneRenderer?) {
         Task {
             do {
                 try await renderer?.load(modelIdentifier)
@@ -98,20 +171,8 @@ struct MetalKitSceneView: ViewRepresentable {
                 print("Error loading model: \(error.localizedDescription)")
             }
         }
-
-        return metalKitView
     }
-
-#if os(macOS)
-    func updateNSView(_ view: MTKView, context: NSViewRepresentableContext<MetalKitSceneView>) {
-        updateView(context.coordinator)
-    }
-#elseif os(iOS)
-    func updateUIView(_ view: MTKView, context: UIViewRepresentableContext<MetalKitSceneView>) {
-        updateView(context.coordinator)
-    }
-#endif
-
+    
     private func updateView(_ coordinator: Coordinator) {
         guard let renderer = coordinator.renderer else { return }
         Task {

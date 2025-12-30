@@ -9,6 +9,35 @@ typealias Float16 = Float
 #warning("x86_64 targets are unsupported by MetalSplatter and will fail at runtime. MetalSplatter builds on x86_64 only because Xcode builds Swift Packages as universal binaries and provides no way to override this. When Swift supports Float16 on x86_64, this may be revisited.")
 #endif
 
+private class SplatAccumulator: SplatSceneReaderDelegate {
+    var onPoints: ([SplatScenePoint]) -> Void
+    
+    init(onPoints: @escaping ([SplatScenePoint]) -> Void) {
+        self.onPoints = onPoints
+    }
+    
+    // Explicitly matching: func didStartReading(withPointCount pointCount: UInt32?)
+    func didStartReading(withPointCount pointCount: UInt32?) {
+        // Optional: Pre-allocate capacity if you wanted to
+    }
+    
+    // Explicitly matching: func didRead(points: [SplatScenePoint])
+    func didRead(points: [SplatScenePoint]) {
+        onPoints(points)
+    }
+    
+    // Explicitly matching: func didFinishReading()
+    func didFinishReading() {}
+    
+    // Explicitly matching: func didFailReading(withError error: Error?)
+    // Using Swift.Error to avoid any ambiguity
+    func didFailReading(withError error: Swift.Error?) {
+        if let error = error {
+            print("SplatAccumulator Error: \(error)")
+        }
+    }
+}
+
 public class SplatRenderer {
     enum Constants {
         // Keep in sync with Shaders.metal : maxViewCount
@@ -104,7 +133,23 @@ public class SplatRenderer {
         var index: UInt32
         var depth: Float
     }
-
+    
+    struct CanonicalSplat {
+        var position: MTLPackedFloat3
+        var color: SplatRenderer.PackedRGBHalf4
+//        var rotation: SIMD4<Float>
+        var rotationX: Float
+        var rotationY: Float
+        var rotationZ: Float
+        var rotationW: Float
+        var scale: MTLPackedFloat3
+    }
+    
+    // Deformation Support
+    var canonicalBuffer: MetalBuffer<CanonicalSplat>?
+    var mlpWeightsBuffer: MTLBuffer?
+    var deformationPipeline: MTLComputePipelineState?
+    
     public let device: MTLDevice
     public let colorFormat: MTLPixelFormat
     public let depthFormat: MTLPixelFormat
@@ -192,7 +237,6 @@ public class SplatRenderer {
 #if arch(x86_64)
         fatalError("MetalSplatter is unsupported on Intel architecture (x86_64)")
 #endif
-
         self.device = device
 
         self.colorFormat = colorFormat
@@ -408,6 +452,89 @@ public class SplatRenderer {
             resort()
         }
     }
+    
+    public func loadDeformableScene(directory: URL) async throws {
+        // When selecting a whole directory as input,
+        // automatically consider as loading a dynamic scene.
+        
+        // Configure scene and deform mlp path
+        let plyURL = directory.appendingPathComponent("point_cloud.ply")
+        let weightsURL = directory.appendingPathComponent("weights.bin")
+        
+        // Load the mlp weight
+        let weightsData = try Data(contentsOf: weightsURL)
+        self.mlpWeightsBuffer = weightsData.withUnsafeBytes { rawBuffer in
+            device.makeBuffer(bytes: rawBuffer.baseAddress!, length: weightsData.count, options: .storageModeShared)
+        }
+        
+        // Load the canonical scene
+        let reader = try SplatPLYSceneReader(plyURL)
+        let points = try await readPointsFrom(reader: reader) // Helper function below
+        
+        // Conver to CanonicalSplat and go to device
+        let canonicalSplats = points.map { CanonicalSplat($0) }
+        self.canonicalBuffer = try MetalBuffer(device: device, capacity: canonicalSplats.count)
+        self.canonicalBuffer?.append(canonicalSplats)
+        
+        try self.splatBuffer.setCapacity(canonicalSplats.count)
+        self.splatBuffer.count = canonicalSplats.count
+        
+        try buildDeformationPipeline()
+        
+        print("Loaded Deformable Scene: \(canonicalSplats.count) points")
+    }
+    
+    private func readPointsFrom(reader: SplatSceneReader) async throws -> [SplatScenePoint] {
+        var points: [SplatScenePoint] = []
+        
+        // Use the file-level private class
+        let accumulator = SplatAccumulator { newPoints in
+            points.append(contentsOf: newPoints)
+        }
+        
+        reader.read(to: accumulator)
+        return points
+    }
+    
+    private func buildDeformationPipeline() throws {
+        let library = try device.makeDefaultLibrary(bundle: Bundle.module)
+        // Ensure "deformSplats" matches the name in your Deform.metal file
+        let function = library.makeFunction(name: "deformSplats")!
+        self.deformationPipeline = try device.makeComputePipelineState(function: function)
+    }
+    
+    public func update(time: Float, commandBuffer: MTLCommandBuffer) {
+        guard let pipeline = deformationPipeline,
+              let inBuffer = canonicalBuffer?.buffer, // This is optional, so we unwrap it
+              let weightBuffer = mlpWeightsBuffer else { return }
+
+        let outBuffer = splatBuffer.buffer
+        
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        
+        encoder.label = "Deformation Pass"
+        encoder.setComputePipelineState(pipeline)
+        
+        encoder.setBuffer(inBuffer, offset: 0, index: 0)
+        encoder.setBuffer(outBuffer, offset: 0, index: 1)
+        
+        var timeVal = time
+        encoder.setBytes(&timeVal, length: MemoryLayout<Float>.size, index: 2)
+        encoder.setBuffer(weightBuffer, offset: 0, index: 3)
+        
+        let count = canonicalBuffer?.count ?? 0
+        let w = pipeline.threadExecutionWidth // Usually 32 or 64
+        
+        let threads = MTLSize(width: count, height: 1, depth: 1)
+        
+        let threadgroupSize = MTLSize(width: w, height: 1, depth: 1)
+        
+        encoder.dispatchThreads(threads, threadsPerThreadgroup: threadgroupSize)
+//        let threadsPerGrid = MTLSize(width: count, height: 1, depth: 1)
+//        let threadsPerGroup = MTLSize(width: pipeline.maxTotalThreadsPerThreadgroup, height: 1, depth: 1)
+//        encoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerGroup)
+        encoder.endEncoding()
+    }
 
     private static func cameraWorldForward(forViewMatrix view: simd_float4x4) -> simd_float3 {
         (view.inverse * SIMD4<Float>(x: 0, y: 0, z: -1, w: 0)).xyz
@@ -468,7 +595,7 @@ public class SplatRenderer {
 
         return renderEncoder
     }
-
+    
     public func render(viewports: [ViewportDescriptor],
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,
@@ -641,6 +768,37 @@ extension SplatRenderer.Splat {
                   color: SplatRenderer.PackedRGBHalf4(r: Float16(color.x), g: Float16(color.y), b: Float16(color.z), a: Float16(color.w)),
                   covA: SplatRenderer.PackedHalf3(x: Float16(cov3D[0, 0]), y: Float16(cov3D[0, 1]), z: Float16(cov3D[0, 2])),
                   covB: SplatRenderer.PackedHalf3(x: Float16(cov3D[1, 1]), y: Float16(cov3D[1, 2]), z: Float16(cov3D[2, 2])))
+    }
+}
+
+extension SplatRenderer.CanonicalSplat {
+    init(_ splat: SplatScenePoint) {
+        self.init(position: splat.position,
+                  color: .init(splat.color.asLinearFloat.sRGBToLinear, splat.opacity.asLinearFloat),
+                  scale: splat.scale.asLinearFloat,
+                  rotation: splat.rotation.normalized)
+    }
+
+    init(position: SIMD3<Float>,
+         color: SIMD4<Float>,
+         scale: SIMD3<Float>,
+         rotation: simd_quatf) {
+        
+        self.position = MTLPackedFloat3Make(position.x, position.y, position.z)
+        
+        self.color = SplatRenderer.PackedRGBHalf4(
+            r: Float16(color.x),
+            g: Float16(color.y),
+            b: Float16(color.z),
+            a: Float16(color.w)
+        )
+        
+        self.scale = MTLPackedFloat3Make(scale.x, scale.y, scale.z)
+//        self.rotation = SIMD4<Float>(rotation.imag.x, rotation.imag.y, rotation.imag.z, rotation.real)
+        self.rotationX = rotation.imag.x;
+        self.rotationY = rotation.imag.y;
+        self.rotationZ = rotation.imag.z;
+        self.rotationW = rotation.real;
     }
 }
 
