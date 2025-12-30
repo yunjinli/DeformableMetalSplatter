@@ -21,9 +21,16 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     var modelRenderer: (any ModelRenderer)?
 
     let inFlightSemaphore = DispatchSemaphore(value: Constants.maxSimultaneousRenders)
-
-    var lastRotationUpdateTimestamp: Date? = nil
-    var rotation: Angle = .zero
+    
+    // Enable gestures
+    // Drag
+    var yaw: Float = 0.0
+    var pitch: Float = 0.0
+    // Zoom
+    var cameraDistance: Float = Constants.modelCenterZ
+    // Pan xy
+    var panX: Float = 0.0
+    var panY: Float = 0.0
 
     var drawableSize: CGSize = .zero
 
@@ -71,9 +78,11 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                                                              nearZ: 0.1,
                                                              farZ: 100.0)
 
-        let rotationMatrix = matrix4x4_rotation(radians: Float(rotation.radians),
-                                                axis: Constants.rotationAxis)
-        let translationMatrix = matrix4x4_translation(0.0, 0.0, Constants.modelCenterZ)
+        let rotationMatrixY = matrix4x4_rotation(radians: yaw, axis: SIMD3<Float>(0, 1, 0))
+        let rotationMatrixX = matrix4x4_rotation(radians: pitch, axis: SIMD3<Float>(1, 0, 0))
+        let rotationMatrix = rotationMatrixX * rotationMatrixY
+        
+        let translationMatrix = matrix4x4_translation(panX, panY, cameraDistance)
         // Turn common 3D GS PLY files rightside-up. This isn't generally meaningful, it just
         // happens to be a useful default for the most common datasets at the moment.
         let commonUpCalibration = matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))
@@ -84,16 +93,6 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                                                projectionMatrix: projectionMatrix,
                                                viewMatrix: translationMatrix * rotationMatrix * commonUpCalibration,
                                                screenSize: SIMD2(x: Int(drawableSize.width), y: Int(drawableSize.height)))
-    }
-
-    private func updateRotation() {
-        let now = Date()
-        defer {
-            lastRotationUpdateTimestamp = now
-        }
-
-        guard let lastRotationUpdateTimestamp else { return }
-        rotation += Constants.rotationPerSecond * now.timeIntervalSince(lastRotationUpdateTimestamp)
     }
 
     func draw(in view: MTKView) {
@@ -111,8 +110,6 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         commandBuffer.addCompletedHandler { (_ commandBuffer)-> Swift.Void in
             semaphore.signal()
         }
-
-        updateRotation()
 
         do {
             try modelRenderer.render(viewports: [viewport],
