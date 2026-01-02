@@ -1,5 +1,5 @@
 # Deformable MetalSplatter
-The is a project forked from an amazing work [MetalSplatter](https://github.com/scier/MetalSplatter).
+This project is forked from an amazing work [MetalSplatter](https://github.com/scier/MetalSplatter).
 
 Render deformable 3D Gaussian Splats using Metal on Apple platforms (currently only tested on IOS on my iPhone 15)
 
