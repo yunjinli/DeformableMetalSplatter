@@ -28,6 +28,7 @@ vertex FragmentIn multiStageSplatVertexShader(uint vertexID [[vertex_id]],
                                               uint instanceID [[instance_id]],
                                               ushort amplificationID [[amplification_id]],
                                               constant Splat* splatArray [[ buffer(BufferIndexSplat) ]],
+                                              constant uint* splatIndices [[ buffer(2) ]],
                                               constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]]) {
     Uniforms uniforms = uniformsArray.uniforms[min(int(amplificationID), kMaxViewCount)];
 
@@ -37,8 +38,10 @@ vertex FragmentIn multiStageSplatVertexShader(uint vertexID [[vertex_id]],
         out.position = float4(1, 1, 0, 1);
         return out;
     }
-
-    Splat splat = splatArray[splatID];
+    
+    uint actualSplatID = splatIndices[splatID];
+    
+    Splat splat = splatArray[actualSplatID];
 
     return splatVertex(splat, uniforms, vertexID % 4);
 }

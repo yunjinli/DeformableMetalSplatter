@@ -4,40 +4,13 @@ import MetalKit
 import os
 import SplatIO
 import Accelerate
+import MetalPerformanceShaders
+import MetalPerformanceShadersGraph
 
 #if arch(x86_64)
 typealias Float16 = Float
 #warning("x86_64 targets are unsupported by MetalSplatter and will fail at runtime. MetalSplatter builds on x86_64 only because Xcode builds Swift Packages as universal binaries and provides no way to override this. When Swift supports Float16 on x86_64, this may be revisited.")
 #endif
-
-private class SplatAccumulator: SplatSceneReaderDelegate {
-    var onPoints: ([SplatScenePoint]) -> Void
-    
-    init(onPoints: @escaping ([SplatScenePoint]) -> Void) {
-        self.onPoints = onPoints
-    }
-    
-    // Explicitly matching: func didStartReading(withPointCount pointCount: UInt32?)
-    func didStartReading(withPointCount pointCount: UInt32?) {
-        // Optional: Pre-allocate capacity if you wanted to
-    }
-    
-    // Explicitly matching: func didRead(points: [SplatScenePoint])
-    func didRead(points: [SplatScenePoint]) {
-        onPoints(points)
-    }
-    
-    // Explicitly matching: func didFinishReading()
-    func didFinishReading() {}
-    
-    // Explicitly matching: func didFailReading(withError error: Error?)
-    // Using Swift.Error to avoid any ambiguity
-    func didFailReading(withError error: Swift.Error?) {
-        if let error = error {
-            print("SplatAccumulator Error: \(error)")
-        }
-    }
-}
 
 public class SplatRenderer {
     enum Constants {
@@ -60,7 +33,9 @@ public class SplatRenderer {
     private static let log =
         Logger(subsystem: Bundle.module.bundleIdentifier!,
                category: "SplatRenderer")
-
+    
+    private var computeDepthsPipelineState: MTLComputePipelineState?
+    
     public struct ViewportDescriptor {
         public var viewport: MTLViewport
         public var projectionMatrix: simd_float4x4
@@ -79,6 +54,7 @@ public class SplatRenderer {
     enum BufferIndex: NSInteger {
         case uniforms = 0
         case splat    = 1
+        case splatIndices = 2
     }
 
     // Keep in sync with Shaders.metal : Uniforms
@@ -137,7 +113,7 @@ public class SplatRenderer {
     
     struct CanonicalSplat {
         var position: MTLPackedFloat3
-        var color: SplatRenderer.PackedRGBHalf4
+        var color: PackedRGBHalf4
         var rotationX: Float
         var rotationY: Float
         var rotationZ: Float
@@ -147,10 +123,12 @@ public class SplatRenderer {
     
     // Deformation Support
     var canonicalBuffer: MetalBuffer<CanonicalSplat>?
+    var canonicalSplatBufferPrime: MetalBuffer<CanonicalSplat>?
+    var sortedIndexBuffer: MetalBuffer<UInt32>?
     var deformSystem: DeformGraphSystem?
     var extractPipeline: MTLComputePipelineState?
     var applyPipeline: MTLComputePipelineState?
-
+    
     // Intermediate Buffers
     var bufXYZ: MTLBuffer?
     var bufT: MTLBuffer?
@@ -229,7 +207,7 @@ public class SplatRenderer {
     // rendering.
     // TODO: Replace this with a more robust multiple-buffer scheme to guarantee we're never actively sorting a buffer still in use for rendering
     var splatBufferPrime: MetalBuffer<Splat>
-
+    
     var indexBuffer: MetalBuffer<UInt32>
 
     public var splatCount: Int { splatBuffer.count }
@@ -262,6 +240,8 @@ public class SplatRenderer {
 
         self.splatBuffer = try MetalBuffer(device: device)
         self.splatBufferPrime = try MetalBuffer(device: device)
+        self.sortedIndexBuffer = try MetalBuffer(device: device)
+//        self.canonicalSplatBufferPrime = try MetalBuffer(device: device)
         self.indexBuffer = try MetalBuffer(device: device)
 
         do {
@@ -462,6 +442,21 @@ public class SplatRenderer {
         }
     }
     
+    public func readCanonical(from url: URL) async throws {
+        self.canonicalBuffer = try MetalBuffer(device: device) // Initialize the buffer
+        
+        // Follow the same logic when loading SplatBuffer
+        var newPoints = SplatMemoryBuffer()
+        try await newPoints.read(from: try AutodetectSceneReader(url))
+        do {
+            try self.canonicalBuffer!.ensureCapacity(newPoints.points.count)
+        } catch {
+            Self.log.error("Failed to grow buffers: \(error)")
+            return
+        }
+
+        canonicalBuffer!.append(newPoints.points.map { CanonicalSplat($0) })
+    }
     public func loadDeformableScene(directory: URL) async throws {
         // When selecting a whole directory as input,
         // automatically consider as loading a dynamic scene.
@@ -490,21 +485,13 @@ public class SplatRenderer {
         self.extractPipeline = try await device.makeComputePipelineState(function: extractFunc)
         self.applyPipeline = try await device.makeComputePipelineState(function: applyFunc)
         
-        // Read canonical Gaussians
-        let reader = try SplatPLYSceneReader(plyURL)
-        let points = try await readPointsFrom(reader: reader)
+        // Read canonical Gaussians using the original IO pipeline
+        try await readCanonical(from: plyURL)
+        try await read(from: plyURL)
         
-        let canonicalSplats = points.map { CanonicalSplat($0) }
-        
-        self.canonicalBuffer = try MetalBuffer(device: device, capacity: canonicalSplats.count)
-        self.canonicalBuffer?.append(canonicalSplats)
-        
-        try self.splatBuffer.setCapacity(canonicalSplats.count)
-        self.splatBuffer.count = canonicalSplats.count
-        
+        guard canonicalBuffer!.count == splatBuffer.count else {return}
         // Allocate Buffers
         let count = canonicalBuffer?.count ?? 0
-        Self.log.debug("canonical buffer count: \(count)")
         
         if count > 0 {
             bufXYZ = device.makeBuffer(length: count * 3 * 4, options: .storageModePrivate)
@@ -514,71 +501,59 @@ public class SplatRenderer {
             bufDScale = device.makeBuffer(length: count * 3 * 4, options: .storageModePrivate)
         }
         
-        guard let queue = device.makeCommandQueue(),
-              let sys = deformSystem,
-              let extractPipe = extractPipeline,
-              let applyPipe = applyPipeline,
-              let cBuffer = canonicalBuffer?.buffer,
-              let bXYZ = bufXYZ, let bT = bufT,
-              let bDXYZ = bufDXYZ, let bDRot = bufDRot, let bDScale = bufDScale else { return }
-
-        // Extract xyz from canonical Gaussians and send t=0.0
-        if let cmdA = queue.makeCommandBuffer(),
-           let enc = cmdA.makeComputeCommandEncoder() {
-            enc.label = "Init: Extract"
-            enc.setComputePipelineState(extractPipe)
-            enc.setBuffer(cBuffer, offset: 0, index: 0)
-            enc.setBuffer(bXYZ, offset: 0, index: 1)
-            enc.setBuffer(bT, offset: 0, index: 2)
-            var t = 0.0
-            enc.setBytes(&t, length: 4, index: 3)
-            let w = extractPipe.threadExecutionWidth
-            enc.dispatchThreads(MTLSize(width: count, height: 1, depth: 1),
-                                threadsPerThreadgroup: MTLSize(width: w, height: 1, depth: 1))
-            enc.endEncoding()
-            cmdA.commit()
-            cmdA.waitUntilCompleted()
-        }
-        
-        // Calculate d_xyz, d_rotation, d_scaling
-        sys.run(commandQueue: queue,
-                xyzBuffer: bXYZ,
-                tBuffer: bT,
-                outXYZ: bDXYZ,
-                outRot: bDRot,
-                outScale: bDScale,
-                count: count)
-        
-        // Apply deformation to canonical Gaussians
-        if let cmdC = queue.makeCommandBuffer(),
-           let enc = cmdC.makeComputeCommandEncoder() {
-            enc.label = "Init: Apply"
-            enc.setComputePipelineState(applyPipe)
-            enc.setBuffer(cBuffer, offset: 0, index: 0)
-            enc.setBuffer(bDXYZ, offset: 0, index: 1)
-            enc.setBuffer(bDRot, offset: 0, index: 2)
-            enc.setBuffer(bDScale, offset: 0, index: 3)
-            enc.setBuffer(splatBuffer.buffer, offset: 0, index: 4)
-            let w = applyPipe.threadExecutionWidth
-            enc.dispatchThreads(MTLSize(width: count, height: 1, depth: 1),
-                                threadsPerThreadgroup: MTLSize(width: w, height: 1, depth: 1))
-            enc.endEncoding()
-            cmdC.commit()
-            cmdC.waitUntilCompleted()
-        }
-        print("Loaded Deformable Scene: \(canonicalSplats.count) points")
-    }
-    
-    private func readPointsFrom(reader: SplatSceneReader) async throws -> [SplatScenePoint] {
-        var points: [SplatScenePoint] = []
-        
-        // Use the file-level private class
-        let accumulator = SplatAccumulator { newPoints in
-            points.append(contentsOf: newPoints)
-        }
-        
-        reader.read(to: accumulator)
-        return points
+//        guard let queue = device.makeCommandQueue(),
+//              let sys = deformSystem,
+//              let extractPipe = extractPipeline,
+//              let applyPipe = applyPipeline,
+//              let cBuffer = canonicalBuffer?.buffer,
+//              let bXYZ = bufXYZ, let bT = bufT,
+//              let bDXYZ = bufDXYZ, let bDRot = bufDRot, let bDScale = bufDScale else { return }
+//
+//        // Extract xyz from canonical Gaussians and send t=0.0
+//        if let cmdA = queue.makeCommandBuffer(),
+//           let enc = cmdA.makeComputeCommandEncoder() {
+//            enc.label = "Init: Extract"
+//            enc.setComputePipelineState(extractPipe)
+//            enc.setBuffer(cBuffer, offset: 0, index: 0)
+//            enc.setBuffer(bXYZ, offset: 0, index: 1)
+//            enc.setBuffer(bT, offset: 0, index: 2)
+//            var t = 0.0
+//            enc.setBytes(&t, length: 4, index: 3)
+//            let w = extractPipe.threadExecutionWidth
+//            enc.dispatchThreads(MTLSize(width: count, height: 1, depth: 1),
+//                                threadsPerThreadgroup: MTLSize(width: w, height: 1, depth: 1))
+//            enc.endEncoding()
+//            cmdA.commit()
+//            cmdA.waitUntilCompleted()
+//        }
+//        
+//        // Calculate d_xyz, d_rotation, d_scaling
+//        sys.run(commandQueue: queue,
+//                xyzBuffer: bXYZ,
+//                tBuffer: bT,
+//                outXYZ: bDXYZ,
+//                outRot: bDRot,
+//                outScale: bDScale,
+//                count: count)
+//        
+//        // Apply deformation to canonical Gaussians
+//        if let cmdC = queue.makeCommandBuffer(),
+//           let enc = cmdC.makeComputeCommandEncoder() {
+//            enc.label = "Init: Apply"
+//            enc.setComputePipelineState(applyPipe)
+//            enc.setBuffer(cBuffer, offset: 0, index: 0)
+//            enc.setBuffer(bDXYZ, offset: 0, index: 1)
+//            enc.setBuffer(bDRot, offset: 0, index: 2)
+//            enc.setBuffer(bDScale, offset: 0, index: 3)
+//            enc.setBuffer(splatBuffer.buffer, offset: 0, index: 4)
+//            let w = applyPipe.threadExecutionWidth
+//            enc.dispatchThreads(MTLSize(width: count, height: 1, depth: 1),
+//                                threadsPerThreadgroup: MTLSize(width: w, height: 1, depth: 1))
+//            enc.endEncoding()
+//            cmdC.commit()
+//            cmdC.waitUntilCompleted()
+//        }
+        print("Loaded Deformable Scene: \(canonicalBuffer!.count) points")
     }
     
     public func update(time: Float, commandBuffer: MTLCommandBuffer) {
@@ -605,7 +580,6 @@ public class SplatRenderer {
             Self.log.debug("Something is missing.")
             return
         }
-        
         // Extract xyz from canonical Gaussians and send t
         if let extractCmd = commandQueue.makeCommandBuffer(),
            let enc = extractCmd.makeComputeCommandEncoder() {
@@ -786,7 +760,11 @@ public class SplatRenderer {
 
         renderEncoder.setVertexBuffer(dynamicUniformBuffers, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
         renderEncoder.setVertexBuffer(splatBuffer.buffer, offset: 0, index: BufferIndex.splat.rawValue)
-
+        
+        if let sortedBuffer = sortedIndexBuffer?.buffer {
+            renderEncoder.setVertexBuffer(sortedBuffer, offset: 0, index: 2) // Index 2 = BufferIndex.splatIndices
+        }
+        
         renderEncoder.drawIndexedPrimitives(type: .triangle,
                                             indexCount: indexCount,
                                             indexType: .uint32,
@@ -814,54 +792,126 @@ public class SplatRenderer {
     }
 
     // Sort splatBuffer (read-only), storing the results in splatBuffer (write-only) then swap splatBuffer and splatBufferPrime
-    public func resort() {
+    public func resort(useGPU: Bool = true) {
         guard !sorting else { return }
         sorting = true
         onSortStart?()
-        let sortStartTime = Date()
 
         let splatCount = splatBuffer.count
-
+        
         let cameraWorldForward = cameraWorldForward
         let cameraWorldPosition = cameraWorldPosition
+        
+//        // For benchmark.
+//        guard splatCount > 0 else {
+//            sorting = false
+//            let elapsed: TimeInterval = 0
+//            print("Sort time (\(useGPU ? "GPU" : "CPU")): \(elapsed) seconds")
+//            onSortComplete?(elapsed)
+//            return
+//        }
 
-        Task(priority: .high) {
-            defer {
-                sorting = false
-                onSortComplete?(-sortStartTime.timeIntervalSinceNow)
-            }
+        if useGPU {
+            Task(priority: .high) {
+//                let startTime = Date()
 
-            if orderAndDepthTempSort.count != splatCount {
-                orderAndDepthTempSort = Array(repeating: SplatIndexAndDepth(index: .max, depth: 0), count: splatCount)
-            }
-
-            if Constants.sortByDistance {
-                for i in 0..<splatCount {
-                    orderAndDepthTempSort[i].index = UInt32(i)
-                    let splatPosition = splatBuffer.values[i].position.simd
-                    orderAndDepthTempSort[i].depth = (splatPosition - cameraWorldPosition).lengthSquared
-                }
-            } else {
-                for i in 0..<splatCount {
-                    orderAndDepthTempSort[i].index = UInt32(i)
-                    let splatPosition = splatBuffer.values[i].position.simd
-                    orderAndDepthTempSort[i].depth = dot(splatPosition, cameraWorldForward)
-                }
-            }
-
-            orderAndDepthTempSort.sort { $0.depth > $1.depth }
-
-            do {
-                try splatBufferPrime.setCapacity(splatCount)
-                splatBufferPrime.count = 0
-                for newIndex in 0..<orderAndDepthTempSort.count {
-                    let oldIndex = Int(orderAndDepthTempSort[newIndex].index)
-                    splatBufferPrime.append(splatBuffer, fromIndex: oldIndex)
+                // Allocate a GPU buffer for storing distances.
+                guard let distanceBuffer = device.makeBuffer(
+                    length: MemoryLayout<Float>.size * splatCount,
+                    options: .storageModeShared
+                ) else {
+                    Self.log.error("Failed to create distance buffer.")
+                    self.sorting = false
+                    return
                 }
 
-                swap(&splatBuffer, &splatBufferPrime)
-            } catch {
-                // TODO: report error
+                // Compute distances on CPU then copy to distanceBuffer.
+                let distancePtr = distanceBuffer.contents().bindMemory(to: Float.self, capacity: splatCount)
+                if Constants.sortByDistance {
+                    for i in 0 ..< splatCount {
+                        let splatPos = splatBuffer.values[i].position.simd
+                        distancePtr[i] = (splatPos - cameraWorldPosition).lengthSquared
+                    }
+                } else {
+                    for i in 0 ..< splatCount {
+                        let splatPos = splatBuffer.values[i].position.simd
+                        distancePtr[i] = dot(splatPos, cameraWorldForward)
+                    }
+                }
+            
+
+                // Allocate a GPU buffer for the ArgSort output indices
+                guard let indexOutputBuffer = device.makeBuffer(
+                    length: MemoryLayout<Int32>.size * splatCount,
+                    options: .storageModeShared
+                ) else {
+                    Self.log.error("Failed to create output indices buffer.")
+                    self.sorting = false
+                    return
+                }
+
+                // Create command queue for MPSArgSort.
+                guard let commandQueue = device.makeCommandQueue() else {
+                    Self.log.error("Failed to create command queue for MPSArgSort.")
+                    self.sorting = false
+                    return
+                }
+
+                // Run argsort, in decending order.
+                let argSort = MPSArgSort(dataType: .float32, descending: true)
+                argSort(commandQueue: commandQueue,
+                        input: distanceBuffer,
+                        output: indexOutputBuffer,
+                        count: splatCount)
+
+                // Read back the sorted indices and reorder splats on the CPU.
+                let sortedIndicesPtr = indexOutputBuffer.contents().bindMemory(to: Int32.self, capacity: splatCount)
+                        
+                // Convert to Array for safe appending, casting Int32 -> UInt32 to match your other code
+                let sortedIndices = (0..<splatCount).map { UInt32(bitPattern: sortedIndicesPtr[$0]) }
+
+                do {
+                    try? sortedIndexBuffer?.setCapacity(splatCount)
+                    sortedIndexBuffer?.count = 0
+                    sortedIndexBuffer?.append(sortedIndices)
+                } catch {
+                    print("Sort upload failed")
+                }
+                self.sorting = false
+            }
+        } else {
+            Task(priority: .high) {
+                if orderAndDepthTempSort.count != splatCount {
+                    orderAndDepthTempSort = Array(
+                        repeating: SplatIndexAndDepth(index: .max, depth: 0),
+                        count: splatCount
+                    )
+                }
+
+                if Constants.sortByDistance {
+                    for i in 0 ..< splatCount {
+                        orderAndDepthTempSort[i].index = UInt32(i)
+                        let splatPos = splatBuffer.values[i].position.simd
+                        orderAndDepthTempSort[i].depth = (splatPos - cameraWorldPosition).lengthSquared
+                    }
+                } else {
+                    for i in 0 ..< splatCount {
+                        orderAndDepthTempSort[i].index = UInt32(i)
+                        let splatPos = splatBuffer.values[i].position.simd
+                        orderAndDepthTempSort[i].depth = dot(splatPos, cameraWorldForward)
+                    }
+                }
+
+                orderAndDepthTempSort.sort { $0.depth > $1.depth }
+
+                let sortedIndices = orderAndDepthTempSort.map { $0.index }
+                do {
+                    try? sortedIndexBuffer?.setCapacity(splatCount)
+                    sortedIndexBuffer?.count = 0
+                    sortedIndexBuffer?.append(sortedIndices)
+                } catch {
+                    print("Sort upload failed")
+                }
             }
         }
     }
@@ -979,5 +1029,71 @@ private extension MTLLibrary {
             fatalError("Unable to load required shader function: \"\(name)\"")
         }
         return result
+    }
+}
+
+//  Original source: https://gist.github.com/kemchenj/26e1dad40e5b89de2828bad36c81302f
+//  Assessed Feb 2, 2025.
+class MPSArgSort {
+    private let dataType: MPSDataType
+    private let graph: MPSGraph
+    private let graphExecutable: MPSGraphExecutable
+    private let inputTensor: MPSGraphTensor
+    private let outputTensor: MPSGraphTensor
+
+    init(dataType: MPSDataType, descending: Bool = false) {
+        self.dataType = dataType
+
+        let graph = MPSGraph()
+        let inputTensor = graph.placeholder(shape: nil, dataType: dataType, name: nil)
+        let outputTensor = graph.argSort(inputTensor, axis: 0, descending: descending, name: nil)
+
+        self.graph = graph
+        self.inputTensor = inputTensor
+        self.outputTensor = outputTensor
+        self.graphExecutable = autoreleasepool {
+            let compilationDescriptor = MPSGraphCompilationDescriptor()
+            compilationDescriptor.waitForCompilationCompletion = true
+            compilationDescriptor.disableTypeInference()
+            return graph.compile(with: nil,
+                                 feeds: [inputTensor : MPSGraphShapedType(shape: nil, dataType: dataType)],
+                                 targetTensors: [outputTensor],
+                                 targetOperations: nil,
+                                 compilationDescriptor: compilationDescriptor)
+        }
+    }
+
+    func callAsFunction(
+        commandQueue: any MTLCommandQueue,
+        input: any MTLBuffer,
+        output: any MTLBuffer,
+        count: Int
+    ) {
+        autoreleasepool {
+            let commandBuffer = commandQueue.makeCommandBuffer()!
+            callAsFunction(commandBuffer: commandBuffer,
+                           input: input,
+                           output: output,
+                           count: count)
+            assert(commandBuffer.error == nil)
+            assert(commandBuffer.status == .completed)
+        }
+    }
+
+    private func callAsFunction(
+        commandBuffer: any MTLCommandBuffer,
+        input: any MTLBuffer,
+        output: any MTLBuffer,
+        count: Int
+    ) {
+        let shape: [NSNumber] = [count as NSNumber]
+        let inputData = MPSGraphTensorData(input, shape: shape, dataType: dataType)
+        let outputData = MPSGraphTensorData(output, shape: shape, dataType: .int32)
+        let executionDescriptor = MPSGraphExecutableExecutionDescriptor()
+        executionDescriptor.waitUntilCompleted = true
+        graphExecutable.encode(to: MPSCommandBuffer(commandBuffer: commandBuffer),
+                               inputs: [inputData],
+                               results: [outputData],
+                               executionDescriptor: executionDescriptor)
     }
 }
