@@ -27,7 +27,7 @@ public class DeformGraphSystem {
     
     // When passing all points, the GPU crashed..., regularizing it with a batch size
 //    let SAFE_BATCH_SIZE = 16384 * 8
-    let SAFE_BATCH_SIZE = 4096
+    let SAFE_BATCH_SIZE = 16384
     var flatten = true
     public init(device: MTLDevice) {
         self.device = device
