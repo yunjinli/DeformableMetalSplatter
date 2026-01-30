@@ -87,19 +87,6 @@ struct ContentView: View {
                 }
             }
 
-            Spacer()
-
-            Button("Show Sample Box") {
-                openWindow(value: ModelIdentifier.sampleBox)
-            }
-            .padding()
-            .buttonStyle(.borderedProminent)
-#if os(visionOS)
-            .disabled(immersiveSpaceIsShown)
-#endif
-
-            Spacer()
-
 #if os(visionOS)
             Button("Dismiss Immersive Space") {
                 Task {

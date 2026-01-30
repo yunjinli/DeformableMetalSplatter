@@ -4,7 +4,6 @@ import Metal
 import MetalKit
 import MetalSplatter
 import os
-import SampleBoxRenderer
 import simd
 import SwiftUI
 
@@ -77,13 +76,6 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
             }
             
             modelRenderer = splat
-        case .sampleBox:
-            modelRenderer = try! await SampleBoxRenderer(device: device,
-                                                         colorFormat: metalKitView.colorPixelFormat,
-                                                         depthFormat: metalKitView.depthStencilPixelFormat,
-                                                         sampleCount: metalKitView.sampleCount,
-                                                         maxViewCount: 1,
-                                                         maxSimultaneousRenders: Constants.maxSimultaneousRenders)
         case .none:
             break
         }

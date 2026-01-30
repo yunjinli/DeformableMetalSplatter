@@ -8,7 +8,6 @@ This is a Swift/Metal library for rendering scenes captured via the techniques d
 * PLYIO, for reading and writing binary or ASCII PLY files; this is standalone, feel free to use it if you just have a hankering to load up some PLY files for some reason.
 * SplatIO, a thin layer on top of PLYIO to interpret these PLY files (as well as .splat files) as sets of splats
 * SampleApp, a mini app to demonstrate how to use the above (based on Apple template code) -- don't expect much, it's intentionally minimal, just an illustration
-* SampleBoxRenderer, a drop-in replacement for MetalSplatter for debugging integration, which just renders the cube from Apple Metal template
 
 ## Getting Started
 

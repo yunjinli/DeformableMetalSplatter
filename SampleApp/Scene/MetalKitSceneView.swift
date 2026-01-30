@@ -19,7 +19,6 @@ struct MetalKitSceneView: View {
     @State private var showClusterColors: Bool = false
     @State private var showDepthVisualization: Bool = false
     @State private var selectedClusterID: Int32 = -1  // -1 means show all
-    @State private var clickMarkerPosition: CGPoint? = nil  // For showing picking area
 
     var body: some View {
         GeometryReader { geometry in
@@ -28,18 +27,8 @@ struct MetalKitSceneView: View {
                           manualTime: isManualTime ? time : nil,
                           showClusterColors: showClusterColors,
                           showDepthVisualization: showDepthVisualization,
-                          selectedClusterID: $selectedClusterID,
-                          clickMarkerPosition: $clickMarkerPosition)
+                          selectedClusterID: $selectedClusterID)
                     .ignoresSafeArea()
-                
-                // Red circle marker showing picking area
-                if let pos = clickMarkerPosition {
-                    Circle()
-                        .stroke(Color.red, lineWidth: 2)
-                        .frame(width: 60, height: 60)  // 30px radius = 60px diameter
-                        .position(x: pos.x, y: pos.y)
-                        .allowsHitTesting(false)
-                }
 
             // UI Overlay
             VStack(spacing: 12) {
@@ -90,7 +79,6 @@ struct MetalKitSceneView: View {
                         
                         Button("Show All") {
                             selectedClusterID = -1
-                            clickMarkerPosition = nil
                         }
                         .buttonStyle(.bordered)
                     } else {
@@ -116,15 +104,39 @@ private struct MetalView: ViewRepresentable {
     var showClusterColors: Bool?
     var showDepthVisualization: Bool?
     @Binding var selectedClusterID: Int32
-    @Binding var clickMarkerPosition: CGPoint?
 
     class Coordinator: NSObject {
         var renderer: MetalKitSceneRenderer?
         var startCameraDistance: Float = 0.0
         var selectedClusterIDBinding: Binding<Int32>?
-        var clickMarkerBinding: Binding<CGPoint?>?
         
 #if os(iOS)
+        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard gesture.state == .ended,
+                  let renderer = renderer,
+                  let view = gesture.view else { return }
+
+            let location = gesture.location(in: view)
+
+            // Convert to drawable coordinates for pick.
+            // Use actual drawable size vs view bounds for accurate scaling.
+            let drawableSize = renderer.drawableSize
+            let scaleX = drawableSize.width / view.bounds.width
+            let scaleY = drawableSize.height / view.bounds.height
+
+            // iOS touch coords have origin at top-left, which matches what the
+            // picking shader expects. Do NOT flip Y here (shader already handles it).
+            let screenPoint = CGPoint(
+                x: location.x * scaleX,
+                y: location.y * scaleY
+            )
+
+            if let clusterID = renderer.pickClusterAt(screenPoint) {
+                selectedClusterIDBinding?.wrappedValue = clusterID
+                renderer.selectedClusterID = clusterID
+            }
+        }
+
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             guard let renderer = renderer else { return }
             
@@ -166,7 +178,6 @@ private struct MetalView: ViewRepresentable {
     func makeCoordinator() -> Coordinator {
         let coordinator = Coordinator()
         coordinator.selectedClusterIDBinding = $selectedClusterID
-        coordinator.clickMarkerBinding = $clickMarkerPosition
         return coordinator
     }
 
@@ -195,7 +206,6 @@ private struct MetalView: ViewRepresentable {
     func updateNSView(_ view: MTKView, context: Context) {
         context.coordinator.renderer?.manualTime = manualTime
         context.coordinator.selectedClusterIDBinding = $selectedClusterID
-        context.coordinator.clickMarkerBinding = $clickMarkerPosition
         if let showClusterColors {
             context.coordinator.renderer?.showClusterColors = showClusterColors
         }
@@ -220,9 +230,6 @@ private struct MetalView: ViewRepresentable {
             let location = convert(event.locationInWindow, from: nil)
             // Flip Y for Metal coordinate system
             let flippedY = bounds.height - location.y
-            
-            // Update marker position (use flipped Y for SwiftUI overlay which also has top-left origin)
-            coordinator?.clickMarkerBinding?.wrappedValue = CGPoint(x: location.x, y: flippedY)
             
             // Scale point from view coordinates (points) to drawable coordinates (pixels)
             // This is necessary for Retina displays where drawable size != bounds size
@@ -292,12 +299,22 @@ private struct MetalView: ViewRepresentable {
         metalKitView.delegate = renderer
 
         // Add Gesture Recognizers
+        let tapGesture = UITapGestureRecognizer(target: context.coordinator,
+                                                action: #selector(Coordinator.handleTap(_:)))
+        tapGesture.numberOfTouchesRequired = 1
+        let twoFingerTapGesture = UITapGestureRecognizer(target: context.coordinator,
+                                                         action: #selector(Coordinator.handleTap(_:)))
+        twoFingerTapGesture.numberOfTouchesRequired = 2
         let panGesture = UIPanGestureRecognizer(target: context.coordinator,
                                                 action: #selector(Coordinator.handlePan(_:)))
         let pinchGesture = UIPinchGestureRecognizer(target: context.coordinator,
                                                     action: #selector(Coordinator.handlePinch(_:)))
         panGesture.minimumNumberOfTouches = 1
         panGesture.maximumNumberOfTouches = 2
+        tapGesture.require(toFail: panGesture)
+        twoFingerTapGesture.require(toFail: panGesture)
+        metalKitView.addGestureRecognizer(tapGesture)
+        metalKitView.addGestureRecognizer(twoFingerTapGesture)
         metalKitView.addGestureRecognizer(panGesture)
         metalKitView.addGestureRecognizer(pinchGesture)
 

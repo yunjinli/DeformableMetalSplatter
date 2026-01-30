@@ -4,7 +4,6 @@ import CompositorServices
 import Metal
 import MetalSplatter
 import os
-import SampleBoxRenderer
 import simd
 import Spatial
 import SwiftUI
@@ -63,13 +62,6 @@ class VisionSceneRenderer {
                                           maxSimultaneousRenders: Constants.maxSimultaneousRenders)
             try await splat.read(from: url)
             modelRenderer = splat
-        case .sampleBox:
-            modelRenderer = try! SampleBoxRenderer(device: device,
-                                                   colorFormat: layerRenderer.configuration.colorFormat,
-                                                   depthFormat: layerRenderer.configuration.depthFormat,
-                                                   sampleCount: 1,
-                                                   maxViewCount: layerRenderer.properties.viewCount,
-                                                   maxSimultaneousRenders: Constants.maxSimultaneousRenders)
         case .none:
             break
         }

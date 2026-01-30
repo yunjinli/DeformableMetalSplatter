@@ -22,10 +22,6 @@ let package = Package(
             name: "MetalSplatter",
             targets: [ "MetalSplatter" ]
         ),
-        .library(
-            name: "SampleBoxRenderer",
-            targets: [ "SampleBoxRenderer" ]
-        ),
         .executable(
             name: "SplatConverter",
             targets: [ "SplatConverter" ]
@@ -64,12 +60,6 @@ let package = Package(
             name: "MetalSplatter",
             dependencies: [ "PLYIO", "SplatIO" ],
             path: "MetalSplatter",
-            sources: [ "Sources" ],
-            resources: [ .process("Resources") ]
-        ),
-        .target(
-            name: "SampleBoxRenderer",
-            path: "SampleBoxRenderer",
             sources: [ "Sources" ],
             resources: [ .process("Resources") ]
         ),

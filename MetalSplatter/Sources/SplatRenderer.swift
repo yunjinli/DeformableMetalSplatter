@@ -30,9 +30,7 @@ public class SplatRenderer {
         static let tileSize = MTLSize(width: 32, height: 32, depth: 1)
     }
 
-    private static let log =
-        Logger(subsystem: Bundle.module.bundleIdentifier!,
-               category: "SplatRenderer")
+    private static let log = Logger(subsystem: Bundle.module.bundleIdentifier!,category: "SplatRenderer")
     
     private var computeDepthsPipelineState: MTLComputePipelineState?
     
