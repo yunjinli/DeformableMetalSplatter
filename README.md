@@ -7,9 +7,9 @@ Render deformable 3D Gaussian Splats using Metal on Apple platforms (currently o
 Please follow the steps in original [README](./README_Orig.md) to setup the project in xcode. 
 
 # TODOS
-- [ ] Half precision inference for the MLP
-- [ ] Adding different rendering mode (depth, semantics, classes)
-- [ ] Adding support to click objects
+- [x] Half precision inference for the MLP
+- [ ] Adding different rendering mode (depth ✅, semantics ✅, classes) -> no class support right now
+- [x] Adding support to click objects
 - [ ] ... 
 
 # Usage
