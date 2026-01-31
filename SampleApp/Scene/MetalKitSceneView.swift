@@ -19,6 +19,10 @@ struct MetalKitSceneView: View {
     @State private var showClusterColors: Bool = false
     @State private var showDepthVisualization: Bool = false
     @State private var selectedClusterID: Int32 = -1  // -1 means show all
+    @State private var showControls: Bool = false  // Controls hidden by default on phone
+    @State private var coordinateMode: Int = 0  // 0=default, 1=Z-up→Y-up, 2=flip, 3=none
+    
+    private let coordinateModeLabels = ["Default", "Z→Y", "Y→Z", "None"]
 
     var body: some View {
         GeometryReader { geometry in
@@ -27,67 +31,123 @@ struct MetalKitSceneView: View {
                           manualTime: isManualTime ? time : nil,
                           showClusterColors: showClusterColors,
                           showDepthVisualization: showDepthVisualization,
-                          selectedClusterID: $selectedClusterID)
+                          selectedClusterID: $selectedClusterID,
+                          coordinateMode: coordinateMode)
                     .ignoresSafeArea()
 
             // UI Overlay
-            VStack(spacing: 12) {
-                if isManualTime {
-                    HStack {
-                        Text("Time:")
-                            .font(.subheadline)
-                            .bold()
-                            .foregroundStyle(.white)
-                        
+            VStack(spacing: 8) {
+                // Time slider with manual toggle inline + Show All on right
+                HStack(spacing: 8) {
+                    Toggle("Manual", isOn: $isManualTime)
+                        .toggleStyle(.button)
+                        .font(.caption)
+                    
+                    if isManualTime {
                         Text(String(format: "%.2f", time))
-                            .font(.system(.body, design: .monospaced))
+                            .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.white)
-                            .frame(width: 45, alignment: .leading)
-
+                            .frame(width: 40, alignment: .trailing)
+                        
                         Slider(value: $time, in: 0...1)
                             .accentColor(.blue)
+                    } else {
+                        Spacer()
                     }
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(8)
-                }
-
-                Toggle("Manual Time Control", isOn: $isManualTime)
-                    .toggleStyle(.button)
-                    .padding(8)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(8)
-                
-                HStack {
-                    Toggle("Cluster Colors", isOn: $showClusterColors)
-                        .toggleStyle(.button)
                     
-                    Toggle("Depth", isOn: $showDepthVisualization)
-                        .toggleStyle(.button)
-                }
-                .padding(8)
-                .background(.ultraThinMaterial)
-                .cornerRadius(8)
-                
-                // Cluster selection - always visible, click to select works in any mode
-                HStack {
                     if selectedClusterID >= 0 {
-                        Text("Cluster: \(selectedClusterID)")
-                            .font(.system(.body, design: .monospaced))
-                            .foregroundStyle(.white)
-                        
                         Button("Show All") {
                             selectedClusterID = -1
                         }
                         .buttonStyle(.bordered)
-                    } else {
-                        Text("Click splat to isolate cluster")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.8))
+                        .font(.caption)
                     }
                 }
-                .padding(8)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial)
+                .cornerRadius(8)
+                
+                // Collapsible controls section
+                if showControls {
+                    VStack(spacing: 8) {
+                        HStack {
+                            Toggle("Cluster Colors", isOn: Binding(
+                                get: { showClusterColors },
+                                set: { newValue in
+                                    showClusterColors = newValue
+                                    if newValue { showDepthVisualization = false }
+                                }
+                            ))
+                                .toggleStyle(.button)
+                                .font(.caption)
+                            
+                            Toggle("Depth", isOn: Binding(
+                                get: { showDepthVisualization },
+                                set: { newValue in
+                                    showDepthVisualization = newValue
+                                    if newValue { showClusterColors = false }
+                                }
+                            ))
+                                .toggleStyle(.button)
+                                .font(.caption)
+                        }
+                        .padding(8)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(8)
+                        
+                        // Coordinate system picker
+                        HStack {
+                            Text("Axis:")
+                                .font(.caption)
+                                .foregroundStyle(.white)
+                            
+                            Picker("", selection: $coordinateMode) {
+                                ForEach(0..<coordinateModeLabels.count, id: \.self) { index in
+                                    Text(coordinateModeLabels[index]).tag(index)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(maxWidth: 200)
+                        }
+                        .padding(8)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(8)
+                        
+                        // Cluster selection info
+                        HStack {
+                            if selectedClusterID >= 0 {
+                                Text("Cluster: \(selectedClusterID)")
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.white)
+                            } else {
+                                Text("Tap splat to isolate cluster")
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.8))
+                            }
+                        }
+                        .padding(8)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(8)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+                
+                // Toggle to show/hide extra controls
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showControls.toggle()
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: showControls ? "chevron.down" : "chevron.up")
+                        Text(showControls ? "Hide Controls" : "More Controls")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.8))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
                 .background(.ultraThinMaterial)
                 .cornerRadius(8)
             }
@@ -104,6 +164,7 @@ private struct MetalView: ViewRepresentable {
     var showClusterColors: Bool?
     var showDepthVisualization: Bool?
     @Binding var selectedClusterID: Int32
+    var coordinateMode: Int
 
     class Coordinator: NSObject {
         var renderer: MetalKitSceneRenderer?
@@ -213,6 +274,7 @@ private struct MetalView: ViewRepresentable {
             context.coordinator.renderer?.showDepthVisualization = showDepthVisualization
         }
         context.coordinator.renderer?.selectedClusterID = selectedClusterID
+        context.coordinator.renderer?.coordinateMode = coordinateMode
         updateView(context.coordinator)
     }
     
@@ -332,6 +394,7 @@ private struct MetalView: ViewRepresentable {
             context.coordinator.renderer?.showDepthVisualization = showDepthVisualization
         }
         context.coordinator.renderer?.selectedClusterID = selectedClusterID
+        context.coordinator.renderer?.coordinateMode = coordinateMode
         updateView(context.coordinator)
     }
 #endif // os(iOS)

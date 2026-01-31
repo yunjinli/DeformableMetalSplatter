@@ -37,6 +37,8 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     public var showClusterColors: Bool = false
     public var selectedClusterID: Int32 = -1  // -1 means show all
     public var showDepthVisualization: Bool = false
+    // Coordinate system mode: 0=default, 1=rotate X -90°, 2=rotate X +90°, 3=no rotation
+    public var coordinateMode: Int = 0
     // Total length of the video/animation in seconds
     var animationDuration: Double = 10.0
     
@@ -92,15 +94,29 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         let rotationMatrix = rotationMatrixX * rotationMatrixY
         
         let translationMatrix = matrix4x4_translation(panX, panY, cameraDistance)
-        // Turn common 3D GS PLY files rightside-up. This isn't generally meaningful, it just
-        // happens to be a useful default for the most common datasets at the moment.
-        let commonUpCalibration = matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))
+        
+        // Coordinate system calibration - different modes for different scene conventions
+        let coordinateCalibration: simd_float4x4
+        switch coordinateMode {
+        case 1:
+            // Z-up to Y-up: rotate -90° around X
+            coordinateCalibration = matrix4x4_rotation(radians: -.pi/2, axis: SIMD3<Float>(1, 0, 0))
+        case 2:
+            // Flip Z-up: rotate +90° around X
+            coordinateCalibration = matrix4x4_rotation(radians: .pi/2, axis: SIMD3<Float>(1, 0, 0))
+        case 3:
+            // No rotation (identity)
+            coordinateCalibration = matrix_identity_float4x4
+        default:
+            // Default: 180° around Z (original behavior for common 3DGS PLY files)
+            coordinateCalibration = matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))
+        }
 
         let viewport = MTLViewport(originX: 0, originY: 0, width: drawableSize.width, height: drawableSize.height, znear: 0, zfar: 1)
 
         return ModelRendererViewportDescriptor(viewport: viewport,
                                                projectionMatrix: projectionMatrix,
-                                               viewMatrix: translationMatrix * rotationMatrix * commonUpCalibration,
+                                               viewMatrix: translationMatrix * rotationMatrix * coordinateCalibration,
                                                screenSize: SIMD2(x: Int(drawableSize.width), y: Int(drawableSize.height)))
     }
 

@@ -8,7 +8,7 @@ Please follow the steps in original [README](./README_Orig.md) to setup the proj
 
 # TODOS
 - [x] Half precision inference for the MLP
-- [ ] Adding different rendering mode (depth ✅, semantics ✅, classes) -> no class support right now
+- [x] Adding different rendering mode (depth ✅, instances ✅) -> no class support right now
 - [x] Adding support to click objects
 - [ ] ... 
 
