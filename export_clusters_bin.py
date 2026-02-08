@@ -57,11 +57,11 @@ def export_clusters_bin(src_pt: Path, dst_bin: Path) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Convert clusters.pt to clusters.bin")
-    p.add_argument("src", type=Path, help="Path to clusters.pt")
-    p.add_argument("dst", type=Path, help="Path to output clusters.bin")
+    p.add_argument("--model", default="clusters.pt", type=Path, help="Path to clusters.pt. (Default: clusters.pt)")
+    p.add_argument("--output", default="clusters.bin", type=Path, help="Output clusters.bin path. (Default: clusters.bin)")
     args = p.parse_args()
-    export_clusters_bin(args.src, args.dst)
-    print(f"Wrote {args.dst}")
+    export_clusters_bin(args.model, args.output)
+    print(f"Wrote {args.output}")
 
 
 if __name__ == "__main__":
