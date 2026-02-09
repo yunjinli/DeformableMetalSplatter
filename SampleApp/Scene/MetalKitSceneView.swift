@@ -69,9 +69,11 @@ struct MetalKitSceneView: View {
                         Spacer()
                     }
                     
-                    if selectedClusterID >= 0 {
+                    if selectedClusterID >= 0 || selectedClusterCount > 0 {
                         Button("Show All") {
                             selectedClusterID = -1
+                            selectedClusterCount = 0
+                            isSelectingMode = false
                         }
                         .buttonStyle(.bordered)
                         .font(.caption)
@@ -171,12 +173,6 @@ struct MetalKitSceneView: View {
                                     .font(.caption)
                                     .foregroundStyle(.white.opacity(0.8))
                                 
-                                Button("Show All") {
-                                    selectedClusterCount = 0
-                                    // This will reset mode to 0
-                                }
-                                .buttonStyle(.bordered)
-                                .font(.caption)
                             } else if selectedClusterID >= 0 {
                                 // Single cluster selection (legacy)
                                 Text("Cluster: \(selectedClusterID)")
@@ -184,7 +180,7 @@ struct MetalKitSceneView: View {
                                     .foregroundStyle(.white)
                             } else {
                                 // No selection
-                                Button("Multi-Select") {
+                                Button("Object Selection") {
                                     isSelectingMode = true
                                     selectedClusterID = -1  // Clear single selection
                                 }
@@ -192,10 +188,6 @@ struct MetalKitSceneView: View {
                                 .tint(.blue)
                                 .font(.caption)
                                 .disabled(!hasClusters)
-                                
-                                Text("or tap to isolate")
-                                    .font(.caption2)
-                                    .foregroundStyle(.white.opacity(0.6))
                             }
                         }
                         .padding(8)
@@ -274,9 +266,6 @@ private struct MetalView: ViewRepresentable {
                 if isSelectingModeBinding?.wrappedValue == true {
                     renderer.toggleClusterSelection(clusterID)
                     selectedClusterCountBinding?.wrappedValue = renderer.selectedClusterCount
-                } else {
-                    selectedClusterIDBinding?.wrappedValue = clusterID
-                    renderer.selectedClusterID = clusterID
                 }
             }
         }
@@ -405,9 +394,6 @@ private struct MetalView: ViewRepresentable {
                 if coordinator?.isSelectingModeBinding?.wrappedValue == true {
                     renderer.toggleClusterSelection(clusterID)
                     coordinator?.selectedClusterCountBinding?.wrappedValue = renderer.selectedClusterCount
-                } else {
-                    coordinator?.selectedClusterIDBinding?.wrappedValue = clusterID
-                    renderer.selectedClusterID = clusterID
                 }
             }
         }
