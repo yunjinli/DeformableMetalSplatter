@@ -7,6 +7,7 @@ DerivedData/
 __pycache__/
 *.pyc
 
+ml-mobileclip/
 # Large assets / binaries (tracked via Git LFS when needed)
 *.ply
 *.pth
@@ -16,3 +17,13 @@ __pycache__/
 *.mlpackage/
 example_data/
 
+
+# Generated outputs
+cluster_crops/
+cluster_features.npz
+output.png
+result.png
+result_coreml.png
+
+# HuggingFace model hub files
+coreml_models/hf/

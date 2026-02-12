@@ -22,9 +22,28 @@ vertex FragmentIn singleStageSplatVertexShader(uint vertexID [[vertex_id]],
     return splatVertex(splat, uniforms, vertexID % 4, splatID, clusterColors, clusterIDs, selectedClusters);
 }
 
-fragment half4 singleStageSplatFragmentShader(FragmentIn in [[stage_in]]) {
+typedef struct {
+    half4 color [[color(0)]];
+    int clusterID [[color(1)]];
+} FragmentOut;
+
+fragment FragmentOut singleStageSplatFragmentShader(FragmentIn in [[stage_in]],
+                                                    int currentClusterID [[color(1)]]) {
     half alpha = splatFragmentAlpha(in.relativePosition, in.color.a);
-    return half4(alpha * in.color.rgb, alpha);
+    FragmentOut out;
+    out.color = half4(alpha * in.color.rgb, alpha);
+    
+    // Only update cluster ID if this splat is significantly visible (e.g. > 50% opacity)
+    // AND if it is actually contributing (alpha > 0).
+    // Valid cluster IDs are >= 0.
+    // If we have a valid new ID and enough alpha, we take it.
+    // Otherwise keep the old one.
+    if (alpha > 0.5) {
+        out.clusterID = int(in.clusterID);
+    } else {
+        out.clusterID = currentClusterID;
+    }
+    return out;
 }
 
 

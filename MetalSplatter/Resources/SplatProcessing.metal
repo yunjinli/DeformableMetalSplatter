@@ -92,7 +92,7 @@ FragmentIn splatVertex(Splat splat,
                        constant uint *selectedClusters) {
     FragmentIn out;
     
-    uint thisClusterID = (clusterIDs != nullptr) ? clusterIDs[splatIndex] : 0;
+    uint thisClusterID = (clusterIDs != nullptr) ? clusterIDs[splatIndex] : 0xFFFFFFFF;
     bool clusterIsSelected = false;
     
     // Check if this cluster is in the multi-selection list
@@ -182,6 +182,8 @@ FragmentIn splatVertex(Splat splat,
         half3 clusterColor = half3(clusterColors[splatIndex]);
         out.color = half4(clusterColor, splat.color.a);
     }
+
+    out.clusterID = thisClusterID;
     return out;
 }
 

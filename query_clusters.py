@@ -12,10 +12,9 @@ Example:
         --output result.png --top_k 3
 """
 
-import torch
 import numpy as np
 import open_clip
-from mobileclip.modules.common.mobileone import reparameterize_model
+import coremltools as ct
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import scipy.ndimage
@@ -70,47 +69,47 @@ def load_frame(rgb_path, cluster_path):
     return rgb_img, cluster_img, width, height
 
 
+def encode_text_coreml(text_prompt, text_model_path=None):
+    """Encode text using our converted MobileCLIP2-S0 CoreML text encoder."""
+    if text_model_path == None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        text_model_path = os.path.join(script_dir, "coreml_models", "MobileCLIP2TextEncoder.mlpackage")
+
+    print(f"Loading CoreML text encoder from {text_model_path} ...")
+    mlmodel = ct.models.MLModel(text_model_path)
+
+    spec = mlmodel.get_spec()
+    input_name = spec.description.input[0].name
+    output_name = spec.description.output[0].name
+    print(f"  Input: '{input_name}', Output: '{output_name}'")
+
+    # Use open_clip tokenizer (lightweight, does not load full model weights)
+    tokenizer = open_clip.get_tokenizer("MobileCLIP2-S0")
+    tokens = tokenizer([text_prompt]).numpy().astype(np.int32)  # (1, 77)
+    print(f"  Tokenized -> {(tokens[0] != 0).sum()} non-zero tokens")
+
+    # Run CoreML text encoder
+    pred = mlmodel.predict({input_name: tokens})
+    feat = np.array(pred[output_name]).flatten().astype(np.float32)
+
+    # Already L2-normalized by the wrapper, but ensure it
+    feat = feat / (np.linalg.norm(feat) + 1e-8)
+    return feat
+
+
 def query_clusters(features_path, rgb_path, cluster_path, text_prompt,
-                   output_path, model_name=None, pretrained=None,
+                   output_path, text_model_path=None,
                    threshold=None, top_k=None):
     # Load features
     data = np.load(features_path)
     cluster_ids = data["cluster_ids"]
     features = data["features"]  # (N, D)
 
-    # Use stored model info if not overridden
-    if model_name is None:
-        model_name = str(data.get("model_name", "MobileCLIP2-S0"))
-    if pretrained is None:
-        pretrained = str(data.get("pretrained", "dfndr2b"))
-
     print(f"Loaded {len(cluster_ids)} cluster features (dim={features.shape[1]})")
-    print(f"Model: {model_name} (pretrained={pretrained})")
-    print(f"Query: \"{text_prompt}\"")
+    print(f'Query: "{text_prompt}"')
 
-    # Load model for text encoding
-    model_kwargs = {}
-    if not (model_name.endswith("S3") or model_name.endswith("S4") or model_name.endswith("L-14")):
-        model_kwargs = {"image_mean": (0, 0, 0), "image_std": (1, 1, 1)}
-
-    print(f"Loading model for text encoding...")
-    model, _, _ = open_clip.create_model_and_transforms(
-        model_name, pretrained=pretrained, **model_kwargs
-    )
-    tokenizer = open_clip.get_tokenizer(model_name)
-    model.eval()
-    model = reparameterize_model(model)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = model.to(device)
-
-    # Encode text
-    text_tokens = tokenizer([text_prompt]).to(device)
-    with torch.no_grad():
-        text_features = model.encode_text(text_tokens)
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-
-    text_features_np = text_features.cpu().numpy().squeeze(0)  # (D,)
+    # Encode text with CoreML (MobileCLIP2-S0)
+    text_features_np = encode_text_coreml(text_prompt, text_model_path)
 
     # Compute cosine similarities
     # features is already L2-normalized from encode_clusters.py
@@ -223,16 +222,16 @@ if __name__ == "__main__":
     parser.add_argument("cluster", help="Path to .bin Cluster ID file")
     parser.add_argument("text", help="Text prompt to search for")
     parser.add_argument("--output", default="query_result.png", help="Output PNG (default: query_result.png)")
-    parser.add_argument("--model_name", default=None, help="Model name (default: from features file)")
-    parser.add_argument("--pretrained", default=None, help="Pretrained tag (default: from features file)")
+    parser.add_argument("--text_model_path", default=None,
+                        help="Path to CoreML text .mlpackage (default: coreml_models/MobileCLIP2TextEncoder.mlpackage)")
     parser.add_argument("--threshold", type=float, default=None,
                         help="Select all clusters with similarity >= threshold")
     parser.add_argument("--top_k", type=int, default=None,
                         help="Select top-k clusters by similarity")
     args = parser.parse_args()
-
+    
     query_clusters(
         args.features, args.rgb, args.cluster, args.text,
-        args.output, args.model_name, args.pretrained,
+        args.output, args.text_model_path,
         args.threshold, args.top_k
     )

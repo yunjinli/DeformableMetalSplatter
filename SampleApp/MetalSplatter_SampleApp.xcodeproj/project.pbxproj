@@ -22,6 +22,11 @@
 		61791E162B42297B00302B57 /* MetalKitSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E142B42294700302B57 /* MetalKitSceneView.swift */; };
 		617E50C92B314C4800F99766 /* PLYIO in Frameworks */ = {isa = PBXBuildFile; productRef = 617E50C82B314C4800F99766 /* PLYIO */; };
 		617E50CB2B314C4800F99766 /* SplatIO in Frameworks */ = {isa = PBXBuildFile; productRef = 617E50CA2B314C4800F99766 /* SplatIO */; };
+		AA000001CLIP00000001 /* CLIPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000001CLIP00000002 /* CLIPService.swift */; };
+		AA00CLIP00000011 /* MobileCLIPImageEncoder.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = AA00CLIP00000010 /* MobileCLIPImageEncoder.mlpackage */; };
+		AA00CLIP00000021 /* MobileCLIP2TextEncoder.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = AA00CLIP00000020 /* MobileCLIP2TextEncoder.mlpackage */; };
+		AA00CLIP00000031 /* clip-vocab.json in Resources */ = {isa = PBXBuildFile; fileRef = AA00CLIP00000030 /* clip-vocab.json */; };
+		AA00CLIP00000041 /* clip-merges.txt in Resources */ = {isa = PBXBuildFile; fileRef = AA00CLIP00000040 /* clip-merges.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,6 +44,11 @@
 		61791E112B416DCF00302B57 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		61791E142B42294700302B57 /* MetalKitSceneView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MetalKitSceneView.swift; sourceTree = "<group>"; };
 		617E50B02B314BE200F99766 /* MetalSplatter SampleApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MetalSplatter SampleApp.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA000001CLIP00000002 /* CLIPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIPService.swift; sourceTree = "<group>"; };
+		AA00CLIP00000010 /* MobileCLIPImageEncoder.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; name = MobileCLIPImageEncoder.mlpackage; path = ../coreml_models/MobileCLIPImageEncoder.mlpackage; sourceTree = "<group>"; };
+		AA00CLIP00000020 /* MobileCLIP2TextEncoder.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; name = MobileCLIP2TextEncoder.mlpackage; path = ../coreml_models/MobileCLIP2TextEncoder.mlpackage; sourceTree = "<group>"; };
+		AA00CLIP00000030 /* clip-vocab.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "clip-vocab.json"; path = "../coreml_models/clip-vocab.json"; sourceTree = "<group>"; };
+		AA00CLIP00000040 /* clip-merges.txt */ = {isa = PBXFileReference; lastKnownFileType = text; name = "clip-merges.txt"; path = "../coreml_models/clip-merges.txt"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -58,6 +68,7 @@
 		610347DF2B4689DB00693CE3 /* Model */ = {
 			isa = PBXGroup;
 			children = (
+				AA000001CLIP00000002 /* CLIPService.swift */,
 				61791DDB2B4154FB00302B57 /* ModelIdentifier.swift */,
 				61791DDE2B4154FB00302B57 /* ModelRenderer.swift */,
 				61791DDA2B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift */,
@@ -110,6 +121,10 @@
 				610347DF2B4689DB00693CE3 /* Model */,
 				61791DF82B41551F00302B57 /* Info.plist */,
 				61791DC32B41514300302B57 /* Assets.xcassets */,
+				AA00CLIP00000010 /* MobileCLIPImageEncoder.mlpackage */,
+				AA00CLIP00000020 /* MobileCLIP2TextEncoder.mlpackage */,
+				AA00CLIP00000030 /* clip-vocab.json */,
+				AA00CLIP00000040 /* clip-merges.txt */,
 				61E3FD832AE5CB0200032652 /* Products */,
 				619832682AF0BC390022500D /* Frameworks */,
 			);
@@ -189,6 +204,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA00CLIP00000031 /* clip-vocab.json in Resources */,
+				AA00CLIP00000041 /* clip-merges.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -211,6 +228,9 @@
 				61791E132B416DD700302B57 /* Constants.swift in Sources */,
 				61791E162B42297B00302B57 /* MetalKitSceneView.swift in Sources */,
 				610347DC2B46875A00693CE3 /* ContentStageConfiguration.swift in Sources */,
+				AA000001CLIP00000001 /* CLIPService.swift in Sources */,
+				AA00CLIP00000011 /* MobileCLIPImageEncoder.mlpackage in Sources */,
+				AA00CLIP00000021 /* MobileCLIP2TextEncoder.mlpackage in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -241,9 +261,9 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = com.yourname.MetalSplatterSample;
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = com.yourname.MetalSplatterSample;
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=xros*]" = com.yourname.MetalSplatterSample;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = com.cedric.DeformableMetalSplatterSample;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = com.cedric.DeformableMetalSplatterSample;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=xros*]" = com.cedric.DeformableMetalSplatterSample;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
@@ -281,9 +301,9 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = com.yourname.MetalSplatterSample;
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = com.yourname.MetalSplatterSample;
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=xros*]" = com.yourname.MetalSplatterSample;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = com.cedric.DeformableMetalSplatterSample;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = com.cedric.DeformableMetalSplatterSample;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=xros*]" = com.cedric.DeformableMetalSplatterSample;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
