@@ -39,7 +39,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     public var showClusterColors: Bool = false
     public var selectedClusterID: Int32 = -1  // -1 means show all
     public var showDepthVisualization: Bool = false
-    public var deformationEnabled: Bool = true
+
     public var useMaskedCrops: Bool = false
     
     // Multi-selection
@@ -102,7 +102,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     }
 
     private func clipCacheKey(for model: ModelIdentifier?) -> String? {
-        guard case .gaussianSplat(let url, _, _) = model else { return nil }
+        guard case .gaussianSplat(let url, _) = model else { return nil }
         return url.standardizedFileURL.path
     }
 
@@ -142,7 +142,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
 
         modelRenderer = nil
         switch model {
-        case .gaussianSplat(let url, let useFP16, _):
+        case .gaussianSplat(let url, let useFP16):
             let splat = try SplatRenderer(device: device,
                                           colorFormat: metalKitView.colorPixelFormat,
                                           depthFormat: metalKitView.depthStencilPixelFormat,
@@ -242,7 +242,6 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
             splatRenderer.selectedClusterID = selectedClusterID
             splatRenderer.useDepthVisualization = showDepthVisualization
             splatRenderer.selectionMode = selectionMode
-            splatRenderer.applyRotationDeltas = deformationEnabled
             splatRenderer.update(time: timeToPass, commandBuffer: commandBuffer)
         }
 

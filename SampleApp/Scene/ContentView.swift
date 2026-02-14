@@ -5,7 +5,6 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @State private var isPickingFile = false
     @State private var useFP16: Bool = true  // Default to FP16 for speed
-    @State private var deformationEnabled: Bool = true  // Run deformation network
 
 #if os(macOS)
     @Environment(\.openWindow) private var openWindow
@@ -70,8 +69,7 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 120)
                 
-                Toggle("Deform", isOn: $deformationEnabled)
-                    .toggleStyle(.button)
+
             }
             .padding(.bottom, 8)
 
@@ -100,7 +98,7 @@ struct ContentView: View {
                         try await Task.sleep(for: .seconds(60))
                         url.stopAccessingSecurityScopedResource()
                     }
-                    openWindow(value: ModelIdentifier.gaussianSplat(url, useFP16: useFP16, deformationEnabled: deformationEnabled))
+                    openWindow(value: ModelIdentifier.gaussianSplat(url, useFP16: useFP16))
                 case .failure:
                     break
                 }

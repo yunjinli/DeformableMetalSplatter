@@ -53,9 +53,6 @@ kernel void fill_time(
 }
 
 // Apply d_xyz, d_rotation, d_scaling to the canonical Gaussians.
-// buffer(5) contains a single uint32:
-//   1 = full deformation: apply position, rotation, and scale deltas (standard/default mode)
-//   0 = smooth deformation: apply position deltas only, preserve canonical rotation and scale
 //
 // NOTE: CanonicalSplat.scale is in LINEAR space (asLinearFloat already applied exp() to the
 // PLY log-space scale values). The deformation network's d_scale is also a linear-space delta.
@@ -66,37 +63,24 @@ kernel void apply_graph_outputs(
     device const float* dRot              [[ buffer(2) ]],
     device const float* dScale            [[ buffer(3) ]],
     device Splat* outSplats               [[ buffer(4) ]],
-    constant uint& fullDeform             [[ buffer(5) ]],
     uint id [[ thread_position_in_grid ]]
 ) {
     CanonicalSplat input = inSplats[id];
     
     float3 d_xyz = float3(dXYZ[id*3+0], dXYZ[id*3+1], dXYZ[id*3+2]);
-    
-    // Apply position delta (always)
     float3 new_pos = input.position + d_xyz;
     
     // Rotation: canonical is stored as (x, y, z, w)
+    // Swizzle network rotation output (w,x,y,z) → (x,y,z,w) and add
     float4 rot = float4(input.rotationX, input.rotationY, input.rotationZ, input.rotationW);
-    float4 new_rot;
-    float3 new_scale;
+    float4 d_rotation_raw = float4(dRot[id*4+0], dRot[id*4+1], dRot[id*4+2], dRot[id*4+3]);
+    float4 d_rotation = d_rotation_raw.yzwx;
+    float4 new_rot = normalize(rot) + d_rotation;
+    new_rot = normalize(new_rot);
     
-    if (fullDeform) {
-        // Full mode: apply all deltas
-        // Swizzle network rotation output (w,x,y,z) → (x,y,z,w) and add
-        float4 d_rotation_raw = float4(dRot[id*4+0], dRot[id*4+1], dRot[id*4+2], dRot[id*4+3]);
-        float4 d_rotation = d_rotation_raw.yzwx;
-        new_rot = normalize(rot) + d_rotation;
-        new_rot = normalize(new_rot);
-        
-        // Scale: input.scale is already linear; d_scale is a linear-space delta
-        float3 d_scaling = float3(dScale[id*3+0], dScale[id*3+1], dScale[id*3+2]);
-        new_scale = input.scale + d_scaling;
-    } else {
-        // Smooth mode: position only — keep canonical rotation and scale
-        new_rot = normalize(rot);
-        new_scale = input.scale;
-    }
+    // Scale: input.scale is already linear; d_scale is a linear-space delta
+    float3 d_scaling = float3(dScale[id*3+0], dScale[id*3+1], dScale[id*3+2]);
+    float3 new_scale = input.scale + d_scaling;
     
     Splat out;
     out.position = packed_float3(new_pos);

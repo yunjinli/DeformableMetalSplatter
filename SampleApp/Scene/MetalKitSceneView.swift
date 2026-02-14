@@ -746,9 +746,7 @@ private struct MetalView: ViewRepresentable {
         }
         context.coordinator.renderer?.selectedClusterID = selectedClusterID
         context.coordinator.renderer?.coordinateMode = coordinateMode
-        // Derive deformationEnabled from model identifier (set on start screen)
-        let deformEnabledNS = modelIdentifier?.deformationEnabled ?? true
-        context.coordinator.renderer?.deformationEnabled = deformEnabledNS
+
         context.coordinator.renderer?.useMaskedCrops = useMaskedCrops
         
         // Pass selection mode to renderer
@@ -926,9 +924,7 @@ private struct MetalView: ViewRepresentable {
         }
         context.coordinator.renderer?.selectedClusterID = selectedClusterID
         context.coordinator.renderer?.coordinateMode = coordinateMode
-        // Derive deformationEnabled from model identifier (set on start screen)
-        let deformEnabled = modelIdentifier?.deformationEnabled ?? true
-        context.coordinator.renderer?.deformationEnabled = deformEnabled
+
         context.coordinator.renderer?.useMaskedCrops = useMaskedCrops
         
         // Pass selection mode to renderer

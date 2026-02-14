@@ -1,26 +1,19 @@
 import Foundation
 
 enum ModelIdentifier: Equatable, Hashable, Codable, CustomStringConvertible {
-    case gaussianSplat(URL, useFP16: Bool, deformationEnabled: Bool = true)
+    case gaussianSplat(URL, useFP16: Bool)
 
     var description: String {
         switch self {
-        case .gaussianSplat(let url, let useFP16, let deformationEnabled):
-            "Gaussian Splat: \(url.path) (\(useFP16 ? "FP16" : "FP32")\(deformationEnabled ? "" : ", no deform"))"
+        case .gaussianSplat(let url, let useFP16):
+            "Gaussian Splat: \(url.path) (\(useFP16 ? "FP16" : "FP32"))"
         }
     }
     
     var useFP16: Bool {
         switch self {
-        case .gaussianSplat(_, let useFP16, _):
+        case .gaussianSplat(_, let useFP16):
             return useFP16
-        }
-    }
-    
-    var deformationEnabled: Bool {
-        switch self {
-        case .gaussianSplat(_, _, let deformationEnabled):
-            return deformationEnabled
         }
     }
 }
