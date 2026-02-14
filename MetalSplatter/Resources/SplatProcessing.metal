@@ -92,7 +92,7 @@ FragmentIn splatVertex(Splat splat,
                        constant uint *selectedClusters) {
     FragmentIn out;
     
-    uint thisClusterID = (clusterIDs != nullptr) ? clusterIDs[splatIndex] : 0;
+    uint thisClusterID = (clusterIDs != nullptr) ? clusterIDs[splatIndex] : 0xFFFFFFFF;
     bool clusterIsSelected = false;
     
     // Check if this cluster is in the multi-selection list
@@ -103,6 +103,15 @@ FragmentIn splatVertex(Splat splat,
     // In confirmed mode (selectionMode == 2), cull splats not in selection
     if (uniforms.selectionMode == 2 && uniforms.selectedClusterCount > 0) {
         if (!clusterIsSelected) {
+            out.position = float4(2, 2, 0, 1);  // Off-screen = culled
+            out.color = half4(0);
+            return out;
+        }
+    }
+    
+    // In delete/hide mode (selectionMode == 3), cull splats IN selection
+    if (uniforms.selectionMode == 3 && uniforms.selectedClusterCount > 0) {
+        if (clusterIsSelected) {
             out.position = float4(2, 2, 0, 1);  // Off-screen = culled
             out.color = half4(0);
             return out;
@@ -182,6 +191,8 @@ FragmentIn splatVertex(Splat splat,
         half3 clusterColor = half3(clusterColors[splatIndex]);
         out.color = half4(clusterColor, splat.color.a);
     }
+
+    out.clusterID = thisClusterID;
     return out;
 }
 

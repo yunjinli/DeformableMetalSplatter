@@ -68,6 +68,8 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 120)
+                
+
             }
             .padding(.bottom, 8)
 

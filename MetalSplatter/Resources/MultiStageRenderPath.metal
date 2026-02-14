@@ -4,6 +4,7 @@ typedef struct
 {
     half4 color [[raster_order_group(0)]];
     float depth [[raster_order_group(0)]];
+    int clusterID [[raster_order_group(0)]];
 } FragmentValues;
 
 typedef struct
@@ -15,6 +16,7 @@ typedef struct
 {
     half4 color [[color(0)]];
     float depth [[depth(any)]];
+    int clusterID [[color(1)]];
 } FragmentOut;
 
 kernel void initializeFragmentStore(imageblock<FragmentValues, imageblock_layout_explicit> blockData,
@@ -22,6 +24,7 @@ kernel void initializeFragmentStore(imageblock<FragmentValues, imageblock_layout
     threadgroup_imageblock FragmentValues *values = blockData.data(localThreadID);
     values->color = { 0, 0, 0, 0 };
     values->depth = 0;
+    values->clusterID = -1;
 }
 
 vertex FragmentIn multiStageSplatVertexShader(uint vertexID [[vertex_id]],
@@ -64,6 +67,13 @@ fragment FragmentStore multiStageSplatFragmentShader(FragmentIn in [[stage_in]],
     float previousDepth = previousFragmentValues.depth;
     float depth = in.position.z;
     out.values.depth = previousDepth * oneMinusAlpha + depth * alpha;
+    
+    // Only update clusterID if this splat contributes significantly
+    if (alpha > 0.5) {
+        out.values.clusterID = int(in.clusterID);
+    } else {
+        out.values.clusterID = previousFragmentValues.clusterID;
+    }
 
     return out;
 }
@@ -85,9 +95,18 @@ fragment FragmentOut postprocessFragmentShader(FragmentValues fragmentValues [[i
     FragmentOut out;
     out.depth = (fragmentValues.color.a == 0) ? 0 : fragmentValues.depth / fragmentValues.color.a;
     out.color = fragmentValues.color;
+    out.clusterID = fragmentValues.clusterID;
     return out;
 }
 
-fragment half4 postprocessFragmentShaderNoDepth(FragmentValues fragmentValues [[imageblock_data]]) {
-    return fragmentValues.color;
+typedef struct {
+    half4 color [[color(0)]];
+    int clusterID [[color(1)]];
+} FragmentOutNoDepth;
+
+fragment FragmentOutNoDepth postprocessFragmentShaderNoDepth(FragmentValues fragmentValues [[imageblock_data]]) {
+    FragmentOutNoDepth out;
+    out.color = fragmentValues.color;
+    out.clusterID = fragmentValues.clusterID;
+    return out;
 }

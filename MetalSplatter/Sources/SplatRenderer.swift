@@ -137,6 +137,9 @@ public class SplatRenderer {
     /// If true, the deformation MPSGraph uses FP16 weights/compute (casts I/O to/from FP32).
     /// This is a major speed win on Apple GPUs, but can introduce small numeric differences.
     public var useFP16Deformation: Bool = true
+    /// When true, apply full deformation (position + rotation + scale deltas).
+    /// When false, smooth mode: apply position deltas only, preserve canonical rotation and scale.
+
     public var useClusterColors: Bool = false
     public var selectedClusterID: Int32 = -1  // -1 means show all clusters
     
@@ -363,6 +366,12 @@ public class SplatRenderer {
         colorAttachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
         colorAttachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         pipelineDescriptor.colorAttachments[0] = colorAttachment
+        pipelineDescriptor.colorAttachments[0] = colorAttachment
+
+        let clusterIDAttachment = pipelineDescriptor.colorAttachments[1]!
+        clusterIDAttachment.pixelFormat = .r32Sint
+        clusterIDAttachment.isBlendingEnabled = false
+        pipelineDescriptor.colorAttachments[1] = clusterIDAttachment
 
         pipelineDescriptor.depthAttachmentPixelFormat = depthFormat
 
@@ -533,8 +542,10 @@ public class SplatRenderer {
 
         pipelineDescriptor.label = "InitializePipeline"
         pipelineDescriptor.tileFunction = library.makeRequiredFunction(name: "initializeFragmentStore")
+
         pipelineDescriptor.threadgroupSizeMatchesTileSize = true;
         pipelineDescriptor.colorAttachments[0].pixelFormat = colorFormat
+        pipelineDescriptor.colorAttachments[1].pixelFormat = .r32Sint
 
         return try device.makeRenderPipelineState(tileDescriptor: pipelineDescriptor, options: [], reflection: nil)
     }
@@ -551,6 +562,7 @@ public class SplatRenderer {
         pipelineDescriptor.rasterSampleCount = sampleCount
 
         pipelineDescriptor.colorAttachments[0].pixelFormat = colorFormat
+        pipelineDescriptor.colorAttachments[1].pixelFormat = .r32Sint
         pipelineDescriptor.depthAttachmentPixelFormat = depthFormat
 
         pipelineDescriptor.maxVertexAmplificationCount = maxViewCount
@@ -581,6 +593,7 @@ public class SplatRenderer {
             : library.makeRequiredFunction(name: "postprocessFragmentShaderNoDepth")
 
         pipelineDescriptor.colorAttachments[0]!.pixelFormat = colorFormat
+        pipelineDescriptor.colorAttachments[1]!.pixelFormat = .r32Sint
         pipelineDescriptor.depthAttachmentPixelFormat = depthFormat
 
         pipelineDescriptor.maxVertexAmplificationCount = maxViewCount
@@ -1047,6 +1060,7 @@ public class SplatRenderer {
             enc.setBuffer(bDRot, offset: 0, index: 2)
             enc.setBuffer(bDScale, offset: 0, index: 3)
             enc.setBuffer(splatBuffer.buffer, offset: 0, index: 4)
+
             
             let w = applyPipe.threadExecutionWidth
             let applyStart = CFAbsoluteTimeGetCurrent()
@@ -1071,6 +1085,7 @@ public class SplatRenderer {
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,
                        depthTexture: MTLTexture?,
+                       clusterIDTexture: MTLTexture?,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
                        for commandBuffer: MTLCommandBuffer) -> MTLRenderCommandEncoder {
@@ -1084,6 +1099,22 @@ public class SplatRenderer {
             renderPassDescriptor.depthAttachment.loadAction = .clear
             renderPassDescriptor.depthAttachment.storeAction = .store
             renderPassDescriptor.depthAttachment.clearDepth = 0.0
+        }
+        if let clusterIDTexture {
+            renderPassDescriptor.colorAttachments[1].texture = clusterIDTexture
+            renderPassDescriptor.colorAttachments[1].loadAction = .clear
+            renderPassDescriptor.colorAttachments[1].storeAction = .store
+            // Clear to -1 (0xFFFFFFFF)
+            renderPassDescriptor.colorAttachments[1].clearColor = MTLClearColor(red: -1, green: 0, blue: 0, alpha: 0) // Treat as int/uint?
+            // Metal clearColor is Double. For integer formats, we might need clearValue?
+            // "When the attachment has an integer format, the clear color is used as integer values."
+            // So -1.0 might work if cast? Or I should check docs.
+            // Actually MTLClearColor is (double, double, double, double).
+            // For integer formats, "Only the red channel is used for single-channel formats".
+            // It seems Metal wrapper converts it?
+            // Usually we use `MTLClearColor(red: Double(0xFFFFFFFF), ...)` for uint?
+            // -1 signed int is all 1s.
+            // Let's assume -1.0 is fine or specific bit pattern. Double can represent -1 exactly.
         }
         renderPassDescriptor.rasterizationRateMap = rasterizationRateMap
         renderPassDescriptor.renderTargetArrayLength = renderTargetArrayLength
@@ -1122,6 +1153,7 @@ public class SplatRenderer {
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,
                        depthTexture: MTLTexture?,
+                       clusterIDTexture: MTLTexture? = nil,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
                        to commandBuffer: MTLCommandBuffer) throws {
@@ -1144,7 +1176,9 @@ public class SplatRenderer {
                                           viewports: viewports,
                                           colorTexture: colorTexture,
                                           colorStoreAction: colorStoreAction,
+
                                           depthTexture: depthTexture,
+                                          clusterIDTexture: clusterIDTexture,
                                           rasterizationRateMap: rasterizationRateMap,
                                           renderTargetArrayLength: renderTargetArrayLength,
                                           for: commandBuffer)

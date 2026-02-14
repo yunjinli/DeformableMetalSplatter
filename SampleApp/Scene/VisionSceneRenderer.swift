@@ -53,7 +53,7 @@ class VisionSceneRenderer {
 
         modelRenderer = nil
         switch model {
-        case .gaussianSplat(let url, let useFP16):
+        case .gaussianSplat(let url, let useFP16, _):
             let splat = try SplatRenderer(device: device,
                                           colorFormat: layerRenderer.configuration.colorFormat,
                                           depthFormat: layerRenderer.configuration.depthFormat,
