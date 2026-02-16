@@ -67,13 +67,25 @@ https://github.com/user-attachments/assets/eca6ebd1-7a0b-4ce4-836a-c89b5228afbe
 
 https://github.com/user-attachments/assets/4f7c2aa8-b9bd-4563-ad21-1f4d2a68379c
 
+## MobileCLIP querying on iPhone 17 Air 
+
 
 ## Dynamic Splats + Instances on iPhone 15
 
 https://github.com/user-attachments/assets/3cc26612-be2c-402c-98aa-e538ddf6d732
 
+## MobileCLIP Encoding and Instance Querying on iPhone 17 Air
 
-## MobileCLIP Encoding and Instance Querying 
+https://github.com/user-attachments/assets/c78bf20e-2da5-473e-947b-b0c7bbb5d851
+
+## MobileCLIP Encoding and Instance Querying on Macbook Pro M5
+
+
+https://github.com/user-attachments/assets/789c4074-9b70-4b5d-b072-4bc0e3782901
+
+
+https://github.com/user-attachments/assets/d3423e47-947e-4d1c-a842-eedab2826cf9
+
 
 # Acknowledgments
 This project is a fork of MetalSplatter created by Sean Cier.
