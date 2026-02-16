@@ -1,3 +1,0 @@
-module SplatIO {
-    header "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/SplatIO.build/include/SplatIO-Swift.h"
-}
