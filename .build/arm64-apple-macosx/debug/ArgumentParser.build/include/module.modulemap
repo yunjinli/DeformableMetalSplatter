@@ -1,0 +1,3 @@
+module ArgumentParser {
+    header "/Users/cedric/DeformableMetalSplatter/.build/arm64-apple-macosx/debug/ArgumentParser.build/include/ArgumentParser-Swift.h"
+}

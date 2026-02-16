@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/cedric/DeformableMetalSplatter/.build/arm64-apple-macosx/debug/MetalSplatterPackageTests.xctest/Contents/MacOS/MetalSplatterPackageTests'
+relocations:     []
+...

@@ -2,6 +2,8 @@
 xcuserdata
 DerivedData/
 .swiftpm
+# CoreML models - tracked via Git LFS
+# (but cache/hub files are still ignored)
 coreml_models/
 coreml_models copy/
 # Python
@@ -15,7 +17,7 @@ ml-mobileclip/
 *.pt
 *.bin
 *.mlmodel
-*.mlpackage/
+# CoreML models should be downloaded by users
 example_data/
 
 
@@ -26,5 +28,4 @@ output.png
 result.png
 result_coreml.png
 
-# HuggingFace model hub files
-coreml_models/hf/
+# HuggingFace model hub files (already ignored above)

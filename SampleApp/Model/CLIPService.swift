@@ -137,6 +137,9 @@ public class CLIPService {
             config.computeUnits = .all
             imageEncoder = try MLModel(contentsOf: url, configuration: config)
 
+            // Warmup: run a dummy inference to ensure consistent timing/behavior
+            warmupEncoder(isImage: true)
+
             // Discover I/O names
             if let desc = imageEncoder?.modelDescription {
                 if let firstName = desc.inputDescriptionsByName.keys.first {
@@ -158,6 +161,9 @@ public class CLIPService {
             config.computeUnits = .all
             textEncoder = try MLModel(contentsOf: url, configuration: config)
 
+            // Warmup: run a dummy inference to ensure consistent timing/behavior
+            warmupEncoder(isImage: false)
+
             if let desc = textEncoder?.modelDescription {
                 if let firstName = desc.inputDescriptionsByName.keys.first {
                     textInputName = firstName
@@ -170,6 +176,58 @@ public class CLIPService {
         } catch {
             Self.log.error("Failed to load text encoder: \(error.localizedDescription)")
         }
+    }
+
+    /// Warmup the encoder with a dummy input to ensure consistent first-run behavior.
+    private func warmupEncoder(isImage: Bool) {
+        if isImage {
+            guard let model = imageEncoder else { return }
+            // Create a dummy 256x256 grayscale image
+            guard let dummyImage = createDummyImage(size: 256),
+                  let pixelBuffer = cgImageToPixelBuffer(dummyImage, width: 256, height: 256) else {
+                Self.log.warning("Failed to create dummy image for warmup")
+                return
+            }
+            do {
+                let featureValue = try MLFeatureValue(pixelBuffer: pixelBuffer)
+                let input = try MLDictionaryFeatureProvider(dictionary: [imageInputName: featureValue])
+                _ = try model.prediction(from: input)
+                Self.log.info("Image encoder warmup complete")
+            } catch {
+                Self.log.warning("Image encoder warmup failed: \(error.localizedDescription)")
+            }
+        } else {
+            guard let model = textEncoder else { return }
+            // Create dummy tokens
+            let dummyTokens = [Int32](repeating: 0, count: contextLength)
+            do {
+                let shape: [NSNumber] = [1, NSNumber(value: contextLength)]
+                let tokenArray = try MLMultiArray(shape: shape, dataType: .int32)
+                for i in 0..<contextLength {
+                    tokenArray[i] = NSNumber(value: dummyTokens[i])
+                }
+                let input = try MLDictionaryFeatureProvider(dictionary: [textInputName: MLFeatureValue(multiArray: tokenArray)])
+                _ = try model.prediction(from: input)
+                Self.log.info("Text encoder warmup complete")
+            } catch {
+                Self.log.warning("Text encoder warmup failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Create a small dummy RGB CGImage for warmup (model expects 3-channel input)
+    private func createDummyImage(size: Int) -> CGImage? {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        var pixelData = [UInt8](repeating: 0, count: size * size * 3)
+        // Fill with zeros (black RGB = 0,0,0)
+        guard let context = CGContext(data: &pixelData,
+                                       width: size, height: size,
+                                       bitsPerComponent: 8, bytesPerRow: size * 3,
+                                       space: colorSpace,
+                                       bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue) else {
+            return nil
+        }
+        return context.makeImage()
     }
 
     // MARK: - Tokenizer loading
@@ -386,11 +444,13 @@ public class CLIPService {
 
     /// Given RGB and cluster-ID textures from the renderer, extract per-cluster bounding-box crops
     /// and encode each one with the image encoder. Stores results in `clusterFeatures` / `clusterIDs`.
-    func encodeClusterCrops(rgb: MTLTexture, clusters: MTLTexture, useMaskedCrops: Bool = false) {
+    /// Encode cluster crops. If `averageMaskedAndUnmasked` is true, runs both masked and unmasked
+    /// modes and averages the resulting features for improved robustness.
+    func encodeClusterCrops(rgb: MTLTexture, clusters: MTLTexture, useMaskedCrops: Bool = false, averageMaskedAndUnmasked: Bool = false) {
         let width = rgb.width
         let height = rgb.height
         print("[CLIP-DEBUG] encodeClusterCrops called: rgb=\(width)x\(height), clusters=\(clusters.width)x\(clusters.height)")
-        print("[CLIP-DEBUG] imageEncoder loaded: \(imageEncoder != nil)")
+        print("[CLIP-DEBUG] imageEncoder loaded: \(imageEncoder != nil), averageMaskedAndUnmasked=\(averageMaskedAndUnmasked)")
 
         // Status: reading textures
         DispatchQueue.main.async { [weak self] in
@@ -484,27 +544,75 @@ public class CLIPService {
                 continue
             }
 
-            // Extract the crop from BGRA data → RGB CGImage
-            guard let cropImage = extractCrop(rgbData: rgbData, width: width, height: height,
-                                               x: bb.minX, y: bb.minY, w: cropW, h: cropH,
-                                               clusterData: useMaskedCrops ? clusterData : nil,
-                                               clusterID: cid) else {
-                print("[CLIP-DEBUG]   Failed to extract crop for cluster \(cid)")
-                encodingProgress = (index + 1, totalClusters)
-                DispatchQueue.main.async { [weak self] in
-                    self?.onStatusUpdate?("Encoding \(index + 1) / \(totalClusters)")
-                }
-                continue
+            // Extract the crop(s) from BGRA data → RGB CGImage
+            var cropImageUnmasked: CGImage?
+            var cropImageMasked: CGImage?
+
+            // Always extract unmasked crop
+            cropImageUnmasked = extractCrop(rgbData: rgbData, width: width, height: height,
+                                            x: bb.minX, y: bb.minY, w: cropW, h: cropH,
+                                            clusterData: nil, clusterID: cid)
+
+            // Extract masked crop if needed
+            if averageMaskedAndUnmasked || useMaskedCrops {
+                cropImageMasked = extractCrop(rgbData: rgbData, width: width, height: height,
+                                              x: bb.minX, y: bb.minY, w: cropW, h: cropH,
+                                              clusterData: clusterData, clusterID: cid)
             }
 
             // Encode with CoreML
             print("[CLIP-DEBUG]   Encoding cluster \(cid) (\(index+1)/\(totalClusters)) crop=\(cropW)x\(cropH)")
-            if let features = encodeImage(cropImage) {
-                newIDs.append(cid)
-                newFeatures.append(features)
-                print("[CLIP-DEBUG]   Cluster \(cid) encoded successfully, feature norm=\(features.reduce(0) { $0 + $1*$1 })")
+
+            if averageMaskedAndUnmasked {
+                // Run both modes and average
+                var featuresUnmasked: [Float]? = nil
+                var featuresMasked: [Float]? = nil
+
+                if let img = cropImageUnmasked {
+                    featuresUnmasked = encodeImage(img)
+                }
+                if let img = cropImageMasked {
+                    featuresMasked = encodeImage(img)
+                }
+
+                if let fU = featuresUnmasked, let fM = featuresMasked {
+                    // Average the two feature vectors
+                    var averaged = [Float](repeating: 0, count: Self.featureDim)
+                    for i in 0..<Self.featureDim {
+                        averaged[i] = (fU[i] + fM[i]) * 0.5
+                    }
+                    // Re-normalize after averaging
+                    var normSum: Float = 0
+                    for x in averaged { normSum += x * x }
+                    let norm = sqrt(normSum) + 1e-8
+                    for i in averaged.indices { averaged[i] /= norm }
+
+                    newIDs.append(cid)
+                    newFeatures.append(averaged)
+                    print("[CLIP-DEBUG]   Cluster \(cid) encoded (averaged), unmasked norm=\(fU.reduce(0) { $0 + $1*$1 }), masked norm=\(fM.reduce(0) { $0 + $1*$1 })")
+                } else if let fU = featuresUnmasked {
+                    // Fallback to unmasked only
+                    newIDs.append(cid)
+                    newFeatures.append(fU)
+                    print("[CLIP-DEBUG]   Cluster \(cid) encoded (unmasked fallback)")
+                } else if let fM = featuresMasked {
+                    // Fallback to masked only
+                    newIDs.append(cid)
+                    newFeatures.append(fM)
+                    print("[CLIP-DEBUG]   Cluster \(cid) encoded (masked fallback)")
+                } else {
+                    print("[CLIP-DEBUG]   Cluster \(cid) encoding FAILED (both modes)")
+                }
             } else {
-                print("[CLIP-DEBUG]   Cluster \(cid) encoding FAILED")
+                // Original behavior: use whichever crop was requested
+                let cropImage = useMaskedCrops ? cropImageMasked : cropImageUnmasked
+                if let features = cropImage.flatMap({ encodeImage($0) }) {
+                    newIDs.append(cid)
+                    newFeatures.append(features)
+                    print("[CLIP-DEBUG]   Cluster \(cid) encoded successfully, feature norm=\(features.reduce(0) { $0 + $1*$1 })")
+                } else {
+                    print("[CLIP-DEBUG]   Cluster \(cid) encoding FAILED")
+                }
             }
 
             // Update progress

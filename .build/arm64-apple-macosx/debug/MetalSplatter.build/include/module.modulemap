@@ -1,0 +1,3 @@
+module MetalSplatter {
+    header "/Users/cedric/DeformableMetalSplatter/.build/arm64-apple-macosx/debug/MetalSplatter.build/include/MetalSplatter-Swift.h"
+}

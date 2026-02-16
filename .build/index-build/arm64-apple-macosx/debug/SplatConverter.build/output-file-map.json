@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/SplatConverter.build/master.swiftdeps"
+  },
+  "/Users/cedric/DeformableMetalSplatter/SplatConverter/Sources/SplatConverter.swift": {
+    "dependencies": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/SplatConverter.build/SplatConverter.d",
+    "object": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/SplatConverter.build/SplatConverter.swift.o",
+    "swiftmodule": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/SplatConverter.build/SplatConverter~partial.swiftmodule",
+    "swift-dependencies": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/SplatConverter.build/SplatConverter.swiftdeps",
+    "diagnostics": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/SplatConverter.build/SplatConverter.dia"
+  }
+}

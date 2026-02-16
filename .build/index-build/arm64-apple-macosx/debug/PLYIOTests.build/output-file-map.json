@@ -1,0 +1,33 @@
+{
+  "": {
+    "swift-dependencies": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/master.swiftdeps"
+  },
+  "/Users/cedric/DeformableMetalSplatter/PLYIO/Tests/DataConvertibleTests.swift": {
+    "dependencies": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/DataConvertibleTests.d",
+    "object": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/DataConvertibleTests.swift.o",
+    "swiftmodule": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/DataConvertibleTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/DataConvertibleTests.swiftdeps",
+    "diagnostics": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/DataConvertibleTests.dia"
+  },
+  "/Users/cedric/DeformableMetalSplatter/PLYIO/Tests/PLYIOTests.swift": {
+    "dependencies": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/PLYIOTests.d",
+    "object": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/PLYIOTests.swift.o",
+    "swiftmodule": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/PLYIOTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/PLYIOTests.swiftdeps",
+    "diagnostics": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/PLYIOTests.dia"
+  },
+  "/Users/cedric/DeformableMetalSplatter/PLYIO/Tests/UnsafeRawPointerConvertibleTests.swift": {
+    "dependencies": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/UnsafeRawPointerConvertibleTests.d",
+    "object": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/UnsafeRawPointerConvertibleTests.swift.o",
+    "swiftmodule": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/UnsafeRawPointerConvertibleTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/UnsafeRawPointerConvertibleTests.swiftdeps",
+    "diagnostics": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/UnsafeRawPointerConvertibleTests.dia"
+  },
+  "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/DerivedSources/resource_bundle_accessor.swift": {
+    "dependencies": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/resource_bundle_accessor.d",
+    "object": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/resource_bundle_accessor.swift.o",
+    "swiftmodule": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/resource_bundle_accessor~partial.swiftmodule",
+    "swift-dependencies": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/resource_bundle_accessor.swiftdeps",
+    "diagnostics": "/Users/cedric/DeformableMetalSplatter/.build/index-build/arm64-apple-macosx/debug/PLYIOTests.build/resource_bundle_accessor.dia"
+  }
+}

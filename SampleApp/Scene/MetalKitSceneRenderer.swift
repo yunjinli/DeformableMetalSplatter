@@ -41,7 +41,8 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     public var showDepthVisualization: Bool = false
 
     public var useMaskedCrops: Bool = false
-    
+    public var averageMaskedAndUnmasked: Bool = false  // Run both modes and average features
+
     // Multi-selection
     public var selectionMode: UInt32 = 0
     
@@ -65,6 +66,10 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     /// Returns true if cluster data is available for this scene
     public var hasClusters: Bool {
         (modelRenderer as? SplatRenderer)?.hasClusters ?? false
+    }
+    /// Returns true if CoreML models are available for semantic clustering
+    public var hasCLIPModels: Bool {
+        clipService.hasImageEncoder && clipService.hasTextEncoder
     }
     // Coordinate system mode: 0=default, 1=rotate X -90°, 2=rotate X +90°, 3=no rotation
     public var coordinateMode: Int = 0
@@ -319,9 +324,10 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                 
                 // Dispatch encoding to a background queue so it doesn't block the Metal callback
                 let masked = self.useMaskedCrops
+                let averageBoth = self.averageMaskedAndUnmasked
                 DispatchQueue.global(qos: .userInitiated).async {
-                    print("[CLIP-DEBUG] Background encoding started (masked=\(masked))")
-                    self.clipService.encodeClusterCrops(rgb: rgbTexture, clusters: clusterTexture, useMaskedCrops: masked)
+                    print("[CLIP-DEBUG] Background encoding started (masked=\(masked), averageBoth=\(averageBoth))")
+                    self.clipService.encodeClusterCrops(rgb: rgbTexture, clusters: clusterTexture, useMaskedCrops: masked, averageMaskedAndUnmasked: averageBoth)
                     print("[CLIP-DEBUG] Background encoding finished, hasFeatures=\(self.clipService.hasFeatures)")
                     DispatchQueue.main.async {
                         self.cacheCurrentCLIPFeatures()

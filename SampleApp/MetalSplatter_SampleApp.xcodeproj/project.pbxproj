@@ -23,10 +23,7 @@
 		617E50C92B314C4800F99766 /* PLYIO in Frameworks */ = {isa = PBXBuildFile; productRef = 617E50C82B314C4800F99766 /* PLYIO */; };
 		617E50CB2B314C4800F99766 /* SplatIO in Frameworks */ = {isa = PBXBuildFile; productRef = 617E50CA2B314C4800F99766 /* SplatIO */; };
 		AA000001CLIP00000001 /* CLIPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000001CLIP00000002 /* CLIPService.swift */; };
-		AA00CLIP00000011 /* MobileCLIPImageEncoder.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = AA00CLIP00000010 /* MobileCLIPImageEncoder.mlpackage */; };
-		AA00CLIP00000021 /* MobileCLIP2TextEncoder.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = AA00CLIP00000020 /* MobileCLIP2TextEncoder.mlpackage */; };
-		AA00CLIP00000031 /* clip-vocab.json in Resources */ = {isa = PBXBuildFile; fileRef = AA00CLIP00000030 /* clip-vocab.json */; };
-		AA00CLIP00000041 /* clip-merges.txt in Resources */ = {isa = PBXBuildFile; fileRef = AA00CLIP00000040 /* clip-merges.txt */; };
+
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -45,10 +42,7 @@
 		61791E142B42294700302B57 /* MetalKitSceneView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MetalKitSceneView.swift; sourceTree = "<group>"; };
 		617E50B02B314BE200F99766 /* MetalSplatter SampleApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MetalSplatter SampleApp.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA000001CLIP00000002 /* CLIPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIPService.swift; sourceTree = "<group>"; };
-		AA00CLIP00000010 /* MobileCLIPImageEncoder.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; name = MobileCLIPImageEncoder.mlpackage; path = ../coreml_models/MobileCLIPImageEncoder.mlpackage; sourceTree = "<group>"; };
-		AA00CLIP00000020 /* MobileCLIP2TextEncoder.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; name = MobileCLIP2TextEncoder.mlpackage; path = ../coreml_models/MobileCLIP2TextEncoder.mlpackage; sourceTree = "<group>"; };
-		AA00CLIP00000030 /* clip-vocab.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "clip-vocab.json"; path = "../coreml_models/clip-vocab.json"; sourceTree = "<group>"; };
-		AA00CLIP00000040 /* clip-merges.txt */ = {isa = PBXFileReference; lastKnownFileType = text; name = "clip-merges.txt"; path = "../coreml_models/clip-merges.txt"; sourceTree = "<group>"; };
+
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -121,10 +115,7 @@
 				610347DF2B4689DB00693CE3 /* Model */,
 				61791DF82B41551F00302B57 /* Info.plist */,
 				61791DC32B41514300302B57 /* Assets.xcassets */,
-				AA00CLIP00000010 /* MobileCLIPImageEncoder.mlpackage */,
-				AA00CLIP00000020 /* MobileCLIP2TextEncoder.mlpackage */,
-				AA00CLIP00000030 /* clip-vocab.json */,
-				AA00CLIP00000040 /* clip-merges.txt */,
+
 				61E3FD832AE5CB0200032652 /* Products */,
 				619832682AF0BC390022500D /* Frameworks */,
 			);
@@ -148,6 +139,7 @@
 				617E50AC2B314BE200F99766 /* Sources */,
 				617E50AD2B314BE200F99766 /* Frameworks */,
 				617E50AE2B314BE200F99766 /* Resources */,
+				AA00CLIP99999990 /* Compile CoreML Models (optional) */,
 			);
 			buildRules = (
 			);
@@ -204,8 +196,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA00CLIP00000031 /* clip-vocab.json in Resources */,
-				AA00CLIP00000041 /* clip-merges.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -229,12 +219,28 @@
 				61791E162B42297B00302B57 /* MetalKitSceneView.swift in Sources */,
 				610347DC2B46875A00693CE3 /* ContentStageConfiguration.swift in Sources */,
 				AA000001CLIP00000001 /* CLIPService.swift in Sources */,
-				AA00CLIP00000011 /* MobileCLIPImageEncoder.mlpackage in Sources */,
-				AA00CLIP00000021 /* MobileCLIP2TextEncoder.mlpackage in Sources */,
+
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		AA00CLIP99999990 /* Compile CoreML Models (optional) */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Compile CoreML Models (optional)";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "COREML_DIR=\"${SRCROOT}/../coreml_models\"\nBUNDLE_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\n\nif [ ! -d \"$COREML_DIR\" ]; then\n    echo \"note: coreml_models/ not found — CLIP features will be disabled at runtime.\"\n    exit 0\nfi\n\nif [ -d \"$COREML_DIR/MobileCLIPImageEncoder.mlpackage\" ]; then\n    echo \"Compiling MobileCLIPImageEncoder...\"\n    xcrun coremlc compile \"$COREML_DIR/MobileCLIPImageEncoder.mlpackage\" \"$BUNDLE_DIR\"\nelse\n    echo \"warning: MobileCLIPImageEncoder.mlpackage not found in coreml_models/\"\nfi\n\nif [ -d \"$COREML_DIR/MobileCLIP2TextEncoder.mlpackage\" ]; then\n    echo \"Compiling MobileCLIP2TextEncoder...\"\n    xcrun coremlc compile \"$COREML_DIR/MobileCLIP2TextEncoder.mlpackage\" \"$BUNDLE_DIR\"\nelse\n    echo \"warning: MobileCLIP2TextEncoder.mlpackage not found in coreml_models/\"\nfi\n\nif [ -f \"$COREML_DIR/clip-vocab.json\" ]; then\n    cp \"$COREML_DIR/clip-vocab.json\" \"$BUNDLE_DIR/\"\nfi\n\nif [ -f \"$COREML_DIR/clip-merges.txt\" ]; then\n    cp \"$COREML_DIR/clip-merges.txt\" \"$BUNDLE_DIR/\"\nfi\n\necho \"CoreML model compilation complete.\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
 		617E50C22B314BE300F99766 /* Debug */ = {
@@ -354,7 +360,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -416,7 +422,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;

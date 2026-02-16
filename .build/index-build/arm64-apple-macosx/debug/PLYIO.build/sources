@@ -1,0 +1,13 @@
+/Users/cedric/DeformableMetalSplatter/PLYIO/Sources/BitPatternConvertible.swift
+/Users/cedric/DeformableMetalSplatter/PLYIO/Sources/ByteWidthProviding.swift
+/Users/cedric/DeformableMetalSplatter/PLYIO/Sources/DataConvertible.swift
+/Users/cedric/DeformableMetalSplatter/PLYIO/Sources/EndianConvertible.swift
+/Users/cedric/DeformableMetalSplatter/PLYIO/Sources/PLYElement+ascii.swift
+/Users/cedric/DeformableMetalSplatter/PLYIO/Sources/PLYElement+binary.swift
+/Users/cedric/DeformableMetalSplatter/PLYIO/Sources/PLYElement.swift
+/Users/cedric/DeformableMetalSplatter/PLYIO/Sources/PLYHeader+ascii.swift
+/Users/cedric/DeformableMetalSplatter/PLYIO/Sources/PLYHeader.swift
+/Users/cedric/DeformableMetalSplatter/PLYIO/Sources/PLYReader.swift
+/Users/cedric/DeformableMetalSplatter/PLYIO/Sources/PLYWriter.swift
+/Users/cedric/DeformableMetalSplatter/PLYIO/Sources/UnsafeRawPointerConvertible.swift
+/Users/cedric/DeformableMetalSplatter/PLYIO/Sources/ZeroProviding.swift

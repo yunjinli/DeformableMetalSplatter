@@ -12,10 +12,6 @@ Render deformable 3D Gaussian Splats using Metal on Apple platforms. Tested on :
 Please follow the steps in original [README](./README_Orig.md) to setup the project in xcode. 
 
 # TODOS
-- [x] Half precision inference for the MLP
-- [x] Adding different rendering mode (depth ✅, instances ✅) -> no class support right now
-- [x] Adding support to click objects
-- [x] add option to not use instance mode if clusters file is not provided (toggle disabled + warning shown)
 - [ ] add optional speedup via static vs dynamic splat masking (export_static_mask.py ready, Swift integration pending)
 - [ ] Update BibTex after 3DV proceedings are published
 - [ ] ...
@@ -46,12 +42,18 @@ Export the deform.pth via :
 python export_deform_weights.py --model <path-to-deform.pth> --output <path to deform output.bin>
 ```
 
-### Step 3: Optionally for clusters (store in same path as ```point_cloud.ply``` just like for 1) :
+### Step 3 TRASE clustering: Optionally for clusters (store in same path as ```point_cloud.ply``` just like for 1) :
 
 Train your scene with [TRASE](https://github.com/yunjinli/TRASE) and run the export script : 
 ```bash 
 python export_clusters_bin.py --model <clusters.pt> --output <path to clusters output.bin>
 ```
+
+### Step 4 MobileCLIP querying: Optionally for cluster scenes (perform step 3 first) 
+
+Download the Mobileclip coreml models from [our google drive link](https://drive.google.com/drive/folders/1pilHtEPD7ShOhJpYHbJUgB3HiBgB3CZg?usp=sharing) and put it in ```DeformableMetalSplatter/``` (whole path is then ```DeformableMetalSplatter/coreml_models/```)
+
+You can then move to a certain view and run the ```Encode Clusters CLIP``` button to encode the features, after which the search bar can be used to query clusters with text. ```topk``` setting can be used to decide which amount of clusters can be queried.  
 
 # Demo
 
@@ -70,6 +72,8 @@ https://github.com/user-attachments/assets/4f7c2aa8-b9bd-4563-ad21-1f4d2a68379c
 
 https://github.com/user-attachments/assets/3cc26612-be2c-402c-98aa-e538ddf6d732
 
+
+## MobileCLIP Encoding and Instance Querying 
 
 # Acknowledgments
 This project is a fork of MetalSplatter created by Sean Cier.
