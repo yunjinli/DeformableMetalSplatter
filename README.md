@@ -67,9 +67,6 @@ https://github.com/user-attachments/assets/eca6ebd1-7a0b-4ce4-836a-c89b5228afbe
 
 https://github.com/user-attachments/assets/4f7c2aa8-b9bd-4563-ad21-1f4d2a68379c
 
-## MobileCLIP querying on iPhone 17 Air 
-
-
 ## Dynamic Splats + Instances on iPhone 15
 
 https://github.com/user-attachments/assets/3cc26612-be2c-402c-98aa-e538ddf6d732
