@@ -184,6 +184,26 @@ def generate_deformation_mask(ply_path, model_path, output_path, threshold=0.001
     print(f"Moving splats: {final_moving} ({100*final_moving/num_points:.2f}%)")
     print(f"Static splats: {num_points - final_moving} ({100*(num_points-final_moving)/num_points:.2f}%)")
 
+    # Save mask
+    print(f"\nSaving mask to {output_path}")
+    mask.tofile(output_path)
+    print(f"Saved {num_points} float32 values")
+
+    # Save summary
+    summary_path = output_path + '.txt'
+    with open(summary_path, 'w') as f:
+        f.write(f"Deformation Mask Summary (Per-Splat)\n")
+        f.write(f"====================================\n")
+        f.write(f"PLY: {ply_path}\n")
+        f.write(f"Model: {model_path}\n")
+        f.write(f"Threshold: {threshold}\n")
+        f.write(f"Max t: {max_t}\n")
+        f.write(f"Num samples: {num_samples}\n")
+        f.write(f"Total splats: {num_points}\n")
+        f.write(f"Moving splats: {final_moving} ({100*final_moving/num_points:.2f}%)\n")
+        f.write(f"Static splats: {num_points - final_moving} ({100*(num_points-final_moving)/num_points:.2f}%)\n")
+    print(f"Saved summary to {summary_path}")
+
     return mask
 
 
