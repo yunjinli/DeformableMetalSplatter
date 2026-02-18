@@ -175,10 +175,10 @@ static FragmentIn splatVertex(Splat splat, Uniforms uniforms,
     return out;
   }
 
-  // Show mask visualization: dynamic splats (mask > 0.5) in red, static in
-  // original color
+  // Show mask visualization: dynamic splats (mask > threshold) in red, static
+  // in original color
   if (uniforms.showMask != 0 && deformMasks != nullptr) {
-    if (deformMasks[splatIndex] > 0.5) {
+    if (deformMasks[splatIndex] > uniforms.maskThreshold) {
       out.color = half4(1.0, 0.0, 0.0, splat.color.a); // Red for dynamic
     }
     // Static splats keep their original color

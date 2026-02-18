@@ -45,6 +45,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     public var useMaskedCrops: Bool = true
     public var averageMaskedAndUnmasked: Bool = false  // Run both modes and average features
     public var useMaskedDeformation: Bool = false  // Use mask.bin for deformation (t > 0)
+    public var maskThreshold: Float = 0.0  // Dynamic threshold for deformation mask
 
     // Multi-selection
     public var selectionMode: UInt32 = 0
@@ -77,6 +78,10 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     /// Returns the current deformation FPS (0 if no deformation)
     public var deformFPS: Double {
         (modelRenderer as? SplatRenderer)?.currentDeformFPS ?? 0.0
+    }
+    /// Returns the max mask value for slider scaling
+    public var maxMaskValue: Float {
+        (modelRenderer as? SplatRenderer)?.maxMaskValue ?? 1.0
     }
     /// Returns true if CoreML models are available for semantic clustering
     public var hasCLIPModels: Bool {
@@ -262,6 +267,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
             splatRenderer.useDepthVisualization = showDepthVisualization
             splatRenderer.selectionMode = selectionMode
             splatRenderer.useMaskedDeformation = useMaskedDeformation
+            splatRenderer.maskThreshold = maskThreshold
             splatRenderer.update(time: timeToPass, commandBuffer: commandBuffer)
             
             // Push deformation FPS to UI every frame

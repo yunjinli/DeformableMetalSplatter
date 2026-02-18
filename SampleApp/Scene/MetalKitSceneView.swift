@@ -52,6 +52,7 @@ struct MetalKitSceneView: View {
     
     // Deformation settings
     @State private var useMaskedDeformation: Bool = false  // Use mask.bin for deformation
+    @State private var maskThresholdPercent: Double = 50.0  // 0-100% slider value
     @State private var deformFPS: Double = 0.0  // Deformation FPS from renderer
     @State private var renderFPS: Double = 0.0  // Rendering FPS from renderer
     
@@ -85,6 +86,7 @@ struct MetalKitSceneView: View {
                           queryStatusText: $queryStatusText,
                           queryTopK: $queryTopK,
                           useMaskedDeformation: useMaskedDeformation,
+                          maskThresholdPercent: maskThresholdPercent,
                           deformFPS: $deformFPS,
                           renderFPS: $renderFPS)
                 .ignoresSafeArea()
@@ -124,6 +126,16 @@ struct MetalKitSceneView: View {
                             .toggleStyle(.button)
                             .font(.caption)
                             .tint(.orange)
+
+                        if useMaskedDeformation {
+                            Text(String(format: "%.0f%%", maskThresholdPercent))
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.orange)
+                                .frame(width: 36, alignment: .trailing)
+                            Slider(value: $maskThresholdPercent, in: 0...100)
+                                .accentColor(.orange)
+                                .frame(maxWidth: 120)
+                        }
 
                         if isManualTime {
                             Text(String(format: "%.2f", time))
@@ -499,6 +511,7 @@ struct MetalKitSceneView: View {
         @Binding var queryStatusText: String
         @Binding var queryTopK: Int
         var useMaskedDeformation: Bool
+        var maskThresholdPercent: Double
         @Binding var deformFPS: Double
         @Binding var renderFPS: Double
         
@@ -787,6 +800,11 @@ struct MetalKitSceneView: View {
             context.coordinator.renderer?.useMaskedCrops = useMaskedCrops
             context.coordinator.renderer?.averageMaskedAndUnmasked = averageMaskedAndUnmasked
             context.coordinator.renderer?.useMaskedDeformation = useMaskedDeformation
+            // Convert percentage to absolute threshold using max mask value from renderer
+            if let renderer = context.coordinator.renderer {
+                let absThreshold = Float(maskThresholdPercent / 100.0) * renderer.maxMaskValue
+                renderer.maskThreshold = absThreshold
+            }
 
             // Pass selection mode to renderer
             let mode: UInt32 = isSelectingMode ? 1 : (selectedClusterCount > 0 ? (deleteSelected ? 3 : 2) : 0)
@@ -979,6 +997,10 @@ struct MetalKitSceneView: View {
             context.coordinator.renderer?.useMaskedCrops = useMaskedCrops
             context.coordinator.renderer?.averageMaskedAndUnmasked = averageMaskedAndUnmasked
             context.coordinator.renderer?.useMaskedDeformation = useMaskedDeformation
+            if let renderer = context.coordinator.renderer {
+                let absThreshold = Float(maskThresholdPercent / 100.0) * renderer.maxMaskValue
+                renderer.maskThreshold = absThreshold
+            }
 
             // Pass selection mode to renderer
             let uiMode: UInt32 = isSelectingMode ? 1 : (selectedClusterCount > 0 ? (deleteSelected ? 3 : 2) : 0)

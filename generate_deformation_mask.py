@@ -128,21 +128,22 @@ def compute_deformation_deltas(ply_path, model_path, t, smooth=False):
 def generate_deformation_mask(ply_path, model_path, output_path, threshold=0.001,
                                smooth=False, max_t=1.0, num_samples=10):
     """
-    Generate a deformation mask by comparing positions at t=0 vs multiple timesteps.
+    Generate a continuous deformation magnitude mask.
 
-    A splat is marked as moving (1.0) if its position changes by more than threshold
-    at any sampled timestep between 0 and max_t.
+    For each splat, stores the maximum position displacement (L2 norm) observed
+    across all sampled timesteps. This allows the app to apply dynamic thresholding
+    at runtime for a user-controlled quality/performance tradeoff.
 
     Args:
         ply_path: Input PLY file with Gaussian splat data
         model_path: Path to deform.pth model weights
         output_path: Output .bin file for the mask
-        threshold: Position change threshold to consider a splat as moving (in world units)
+        threshold: Only used for stats display, not for masking
         smooth: Whether to use smooth mode (position deltas only)
         max_t: Maximum time to sample (default 1.0)
         num_samples: Number of timesteps to sample between 0 and max_t
     """
-    print(f"Generating deformation mask: threshold={threshold}, max_t={max_t}, samples={num_samples}")
+    print(f"Generating continuous deformation mask: max_t={max_t}, samples={num_samples}")
 
     # Compute deltas at t=0 (baseline)
     print("\n=== Computing baseline at t=0 ===")
@@ -150,10 +151,9 @@ def generate_deformation_mask(ply_path, model_path, output_path, threshold=0.001
         compute_deformation_deltas(ply_path, model_path, t=0.0, smooth=smooth)
 
     # Get baseline positions (canonical + delta at t=0)
-    # For a well-trained model, d_xyz_0 should be near zero
     baseline_positions = positions_0 + d_xyz_0
 
-    # Initialize mask: 0 = static, will set to 1 if moving
+    # Initialize mask: stores max displacement magnitude per splat
     num_points = positions_0.shape[0]
     mask = np.zeros(num_points, dtype=np.float32)
 
@@ -170,38 +170,49 @@ def generate_deformation_mask(ply_path, model_path, output_path, threshold=0.001
         # Compute position difference from baseline
         diff = np.linalg.norm(deformed_positions - baseline_positions, axis=1)
 
-        # Mark splats as moving if diff exceeds threshold
-        mask[diff > threshold] = 1.0
+        # Keep the maximum displacement across all timesteps
+        mask = np.maximum(mask, diff)
 
         # Progress update
-        moving_count = np.sum(mask)
-        print(f"t={t:.3f}: {moving_count}/{num_points} splats marked as moving ({100*moving_count/num_points:.2f}%)")
+        moving_count = np.sum(mask > threshold)
+        print(f"t={t:.3f}: {moving_count}/{num_points} splats above ref threshold {threshold} ({100*moving_count/num_points:.2f}%)")
 
     # Final statistics
-    final_moving = np.sum(mask)
-    print(f"\n=== Final mask statistics (per-splat) ===")
+    nonzero_mask = mask[mask > 1e-8]
+    print(f"\n=== Final mask statistics (continuous) ===")
     print(f"Total splats: {num_points}")
-    print(f"Moving splats: {final_moving} ({100*final_moving/num_points:.2f}%)")
-    print(f"Static splats: {num_points - final_moving} ({100*(num_points-final_moving)/num_points:.2f}%)")
+    print(f"Max displacement: {np.max(mask):.6f}")
+    if len(nonzero_mask) > 0:
+        print(f"Mean displacement (nonzero): {np.mean(nonzero_mask):.6f}")
+        print(f"Median displacement (nonzero): {np.median(nonzero_mask):.6f}")
+        for pct in [50, 75, 90, 95, 99]:
+            val = np.percentile(nonzero_mask, pct)
+            count_above = np.sum(mask > val)
+            print(f"  P{pct}: {val:.6f} ({count_above} splats above = {100*count_above/num_points:.2f}%)")
 
-    # Save mask
-    print(f"\nSaving mask to {output_path}")
+    # Save mask (continuous float32 values)
+    print(f"\nSaving continuous mask to {output_path}")
     mask.tofile(output_path)
-    print(f"Saved {num_points} float32 values")
+    print(f"Saved {num_points} float32 values (continuous magnitudes)")
 
     # Save summary
     summary_path = output_path + '.txt'
     with open(summary_path, 'w') as f:
-        f.write(f"Deformation Mask Summary (Per-Splat)\n")
-        f.write(f"====================================\n")
+        f.write(f"Deformation Mask Summary (Continuous Per-Splat)\n")
+        f.write(f"===============================================\n")
         f.write(f"PLY: {ply_path}\n")
         f.write(f"Model: {model_path}\n")
-        f.write(f"Threshold: {threshold}\n")
         f.write(f"Max t: {max_t}\n")
         f.write(f"Num samples: {num_samples}\n")
         f.write(f"Total splats: {num_points}\n")
-        f.write(f"Moving splats: {final_moving} ({100*final_moving/num_points:.2f}%)\n")
-        f.write(f"Static splats: {num_points - final_moving} ({100*(num_points-final_moving)/num_points:.2f}%)\n")
+        f.write(f"Max displacement: {np.max(mask):.6f}\n")
+        if len(nonzero_mask) > 0:
+            f.write(f"Mean displacement (nonzero): {np.mean(nonzero_mask):.6f}\n")
+            f.write(f"Median displacement (nonzero): {np.median(nonzero_mask):.6f}\n")
+            for pct in [50, 75, 90, 95, 99]:
+                val = np.percentile(nonzero_mask, pct)
+                count_above = np.sum(mask > val)
+                f.write(f"P{pct}: {val:.6f} ({count_above}/{num_points} above = {100*count_above/num_points:.2f}%)\n")
     print(f"Saved summary to {summary_path}")
 
     return mask

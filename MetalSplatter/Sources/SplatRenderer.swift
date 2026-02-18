@@ -76,7 +76,7 @@ public class SplatRenderer {
         var depthRange: SIMD2<Float>           // 8 bytes  (offset 168) min/max depth
 
         var selectedClusterCount: UInt32 = 0   // 4 bytes  (offset 176)
-        var _pad2: UInt32 = 0                  // 4 bytes  (offset 180) padding
+        var maskThreshold: Float = 0             // 4 bytes  (offset 180) mask threshold
         // Total: 184 bytes
     }
 
@@ -177,6 +177,11 @@ public class SplatRenderer {
     var allOnesMaskBuffer: MTLBuffer?
     /// If true, use mask.bin for deformation at t>0; if false, always deform all splats
     public var useMaskedDeformation: Bool = false
+    /// Threshold for dynamic thresholding: splats with mask value > threshold are deformed.
+    /// mask.bin now stores continuous deformation magnitudes.
+    public var maskThreshold: Float = 0.0
+    /// Maximum mask value in the loaded mask.bin (for UI slider scaling)
+    public var maxMaskValue: Float = 1.0
     private let emptyClusterColorBuffer: MTLBuffer
     private let emptyClusterIdBuffer: MTLBuffer
     private var lastDeformationTime: Float = -1.0
@@ -485,7 +490,7 @@ public class SplatRenderer {
             selectionMode: 0,
             depthRange: SIMD2(0.1, 10.0),
             selectedClusterCount: 0,
-            _pad2: 0
+            maskThreshold: 0
         )
         
         var params = PickingParams(
@@ -677,7 +682,8 @@ public class SplatRenderer {
                                     showDepthVisualization: useDepthVisualization ? 1 : 0,
                                     selectionMode: selectionMode,
                                     depthRange: currentDepthRange,
-                                    selectedClusterCount: UInt32(min(selectedClusters.count, Self.maxSelectedClusters)))
+                                    selectedClusterCount: UInt32(min(selectedClusters.count, Self.maxSelectedClusters)),
+                                    maskThreshold: maskThreshold)
             self.uniforms.pointee.setUniforms(index: i, uniforms)
         }
 
@@ -980,7 +986,11 @@ public class SplatRenderer {
         }
 
         deformMaskBuffer = device.makeBuffer(bytes: maskValues, length: expectedBytes, options: .storageModeShared)
-        Self.log.info("Loaded deform mask (\(expectedCount) entries).")
+        
+        // Compute max mask value for UI slider scaling
+        self.maxMaskValue = maskValues.max() ?? 1.0
+        if self.maxMaskValue < 1e-8 { self.maxMaskValue = 1.0 }
+        Self.log.info("Loaded deform mask (\(expectedCount) entries, max=\(self.maxMaskValue)).")
     }
 
     public func update(time: Float, commandBuffer: MTLCommandBuffer) {
@@ -1037,6 +1047,7 @@ public class SplatRenderer {
                           outRot: bDRot,
                           outScale: bDScale,
                           maskBuffer: deformMaskBuffer!,
+                          threshold: maskThreshold,
                           count: count)
         } else {
             // Run on all splats

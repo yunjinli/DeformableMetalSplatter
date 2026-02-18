@@ -16,7 +16,7 @@ enum BufferIndex : int32_t {
   BufferIndexClusterColor = 3,
   BufferIndexClusterID = 4,
   BufferIndexSelectedClusters = 5,
-  BufferIndexDeformMask = 6,  // For mask visualization
+  BufferIndexDeformMask = 6, // For mask visualization
 };
 
 typedef struct {
@@ -32,19 +32,20 @@ typedef struct {
    */
   uint splatCount;        // 4 bytes  (offset 136)
   uint indexedSplatCount; // 4 bytes  (offset 140)
-  uint showClusterColors;  // 4 bytes  (offset 144)
+  uint showClusterColors; // 4 bytes  (offset 144)
   uint showMask;          // 4 bytes  (offset 148) - show dynamic splats in red
   int selectedClusterID;  // 4 bytes  (offset 152) -1 means show all clusters
                           // (single selection)
 
   uint showDepthVisualization; // 4 bytes  (offset 156)
-  uint selectionMode; // 4 bytes  (offset 160) 0=off, 1=selecting, 2=confirmed, 3=delete(hide)
+  uint selectionMode; // 4 bytes  (offset 160) 0=off, 1=selecting, 2=confirmed,
+                      // 3=delete(hide)
   float2 depthRange;  // 8 bytes  (offset 168) min/max depth for visualization
 
   uint
       selectedClusterCount; // 4 bytes  (offset 176) number of selected clusters
-  uint _pad2;               // 4 bytes  (offset 180) padding
-                            // Total: 184 bytes
+  float maskThreshold; // 4 bytes  (offset 180) threshold for mask visualization
+                       // Total: 184 bytes
 } Uniforms;
 
 typedef struct {

@@ -9,3 +9,5 @@ OUTPUT_PATH="/Users/cedric/Documents/example_data/sear_steak/mask.bin"
 
 # Build the command
 CMD="python generate_deformation_mask.py $PLY_PATH $MODEL_PATH $OUTPUT_PATH --smooth --threshold 0.1 --max-t 1.0 --num-samples 10 "
+echo "Running: $CMD"
+eval $CMD

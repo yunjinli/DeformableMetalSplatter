@@ -301,6 +301,7 @@ public class DeformGraphSystem {
                           outRot: MTLBuffer,
                           outScale: MTLBuffer,
                           maskBuffer: MTLBuffer,
+                          threshold: Float,
                           count: Int) -> Double {
 
         guard let exec = executable else { return 0 }
@@ -311,7 +312,7 @@ public class DeformGraphSystem {
         maskedIndices.reserveCapacity(count / 10)  // Assume ~10% are dynamic
 
         for i in 0..<count {
-            if maskData[i] > 0.5 {
+            if maskData[i] > threshold {
                 maskedIndices.append(i)
             }
         }
@@ -327,11 +328,13 @@ public class DeformGraphSystem {
         let floatSize = MemoryLayout<Float>.size
 
         // Create temporary buffers for the masked subset
-        let tempXYZ = device.makeBuffer(length: maskedCount * 3 * floatSize, options: .storageModeShared)!
-        let tempT = device.makeBuffer(length: maskedCount * 1 * floatSize, options: .storageModeShared)!
-        let tempOutXYZ = device.makeBuffer(length: maskedCount * 3 * floatSize, options: .storageModeShared)!
-        let tempOutRot = device.makeBuffer(length: maskedCount * 4 * floatSize, options: .storageModeShared)!
-        let tempOutScale = device.makeBuffer(length: maskedCount * 3 * floatSize, options: .storageModeShared)!
+        // Pad to next SAFE_BATCH_SIZE boundary to avoid MPS alignment issues
+        let paddedCount = ((maskedCount + SAFE_BATCH_SIZE - 1) / SAFE_BATCH_SIZE) * SAFE_BATCH_SIZE
+        let tempXYZ = device.makeBuffer(length: paddedCount * 3 * floatSize, options: .storageModeShared)!
+        let tempT = device.makeBuffer(length: paddedCount * 1 * floatSize, options: .storageModeShared)!
+        let tempOutXYZ = device.makeBuffer(length: paddedCount * 3 * floatSize, options: .storageModeShared)!
+        let tempOutRot = device.makeBuffer(length: paddedCount * 4 * floatSize, options: .storageModeShared)!
+        let tempOutScale = device.makeBuffer(length: paddedCount * 3 * floatSize, options: .storageModeShared)!
 
         // Copy masked data to temp buffers using memcpy for efficiency
         let xyzSrc = xyzBuffer.contents()
