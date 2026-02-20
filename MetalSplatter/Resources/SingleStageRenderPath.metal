@@ -7,6 +7,7 @@ vertex FragmentIn singleStageSplatVertexShader(uint vertexID [[vertex_id]],
                                                constant packed_float3* clusterColors [[ buffer(BufferIndexClusterColor) ]],
                                                constant uint* clusterIDs [[ buffer(BufferIndexClusterID) ]],
                                                constant uint* selectedClusters [[ buffer(BufferIndexSelectedClusters) ]],
+                                               constant float* deformMasks [[ buffer(BufferIndexDeformMask) ]],
                                                constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]]) {
     Uniforms uniforms = uniformsArray.uniforms[min(int(amplificationID), kMaxViewCount)];
 
@@ -19,7 +20,7 @@ vertex FragmentIn singleStageSplatVertexShader(uint vertexID [[vertex_id]],
 
     Splat splat = splatArray[splatID];
 
-    return splatVertex(splat, uniforms, vertexID % 4, splatID, clusterColors, clusterIDs, selectedClusters);
+    return splatVertex(splat, uniforms, vertexID % 4, splatID, clusterColors, clusterIDs, selectedClusters, deformMasks);
 }
 
 typedef struct {

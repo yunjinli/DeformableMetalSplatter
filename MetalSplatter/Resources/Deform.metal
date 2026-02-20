@@ -57,19 +57,25 @@ kernel void fill_time(
 // NOTE: CanonicalSplat.scale is in LINEAR space (asLinearFloat already applied exp() to the
 // PLY log-space scale values). The deformation network's d_scale is also a linear-space delta.
 // compute_cov() expects linear-space scale for building the S diagonal matrix.
+//
+// When masked deformation is used, runMasked() only overwrites dynamic splat deltas
+// in the output buffers, leaving static splat deltas at their t=0 values. This means
+// we can always apply deltas unconditionally — static splats will retain their t=0
+// appearance (canonical + t=0 network output) rather than raw canonical values.
 kernel void apply_graph_outputs(
     device const CanonicalSplat* inSplats [[ buffer(0) ]],
     device const float* dXYZ              [[ buffer(1) ]],
     device const float* dRot              [[ buffer(2) ]],
     device const float* dScale            [[ buffer(3) ]],
     device Splat* outSplats               [[ buffer(4) ]],
+    device const float* deformMask         [[ buffer(5) ]],
     uint id [[ thread_position_in_grid ]]
 ) {
     CanonicalSplat input = inSplats[id];
-    
+
     float3 d_xyz = float3(dXYZ[id*3+0], dXYZ[id*3+1], dXYZ[id*3+2]);
     float3 new_pos = input.position + d_xyz;
-    
+
     // Rotation: canonical is stored as (x, y, z, w)
     // Swizzle network rotation output (w,x,y,z) → (x,y,z,w) and add
     float4 rot = float4(input.rotationX, input.rotationY, input.rotationZ, input.rotationW);
@@ -77,16 +83,16 @@ kernel void apply_graph_outputs(
     float4 d_rotation = d_rotation_raw.yzwx;
     float4 new_rot = normalize(rot) + d_rotation;
     new_rot = normalize(new_rot);
-    
+
     // Scale: input.scale is already linear; d_scale is a linear-space delta
     float3 d_scaling = float3(dScale[id*3+0], dScale[id*3+1], dScale[id*3+2]);
     float3 new_scale = input.scale + d_scaling;
-    
+
     Splat out;
     out.position = packed_float3(new_pos);
     out.color = input.color;
     compute_cov(new_rot, new_scale, out.covA, out.covB);
-    
+
     outSplats[id] = out;
 }
 

@@ -37,11 +37,15 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     var panY: Float = 0.0
     public var manualTime: Float? = nil
     public var showClusterColors: Bool = false
+    public var showMask: Bool = false  // Show dynamic vs static splats
     public var selectedClusterID: Int32 = -1  // -1 means show all
     public var showDepthVisualization: Bool = false
+    public var renderFPS: Double = 0.0  // Rendering FPS for display
 
     public var useMaskedCrops: Bool = true
     public var averageMaskedAndUnmasked: Bool = false  // Run both modes and average features
+    public var useMaskedDeformation: Bool = false  // Use mask.bin for deformation (t > 0)
+    public var maskThreshold: Float = 0.0  // Dynamic threshold for deformation mask
 
     // Multi-selection
     public var selectionMode: UInt32 = 0
@@ -67,6 +71,41 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     public var hasClusters: Bool {
         (modelRenderer as? SplatRenderer)?.hasClusters ?? false
     }
+    /// Returns true if mask data is available for this scene
+    public var hasMask: Bool {
+        (modelRenderer as? SplatRenderer)?.hasMask ?? false
+    }
+    /// Returns the current deformation FPS (0 if no deformation)
+    public var deformFPS: Double {
+        (modelRenderer as? SplatRenderer)?.currentDeformFPS ?? 0.0
+    }
+    /// Returns the max mask value for slider scaling
+    public var maxMaskValue: Float {
+        (modelRenderer as? SplatRenderer)?.maxMaskValue ?? 1.0
+    }
+    
+    /// Returns the recommended mask percentage (0-100) from the python generation script, if available
+    public var recommendedMaskPercentage: Double? {
+        (modelRenderer as? SplatRenderer)?.recommendedMaskPercentage
+    }
+    
+    /// Saves the current mask percentage to mask.json
+    public func saveRecommendedMaskPercentage(_ percentage: Double) {
+        (modelRenderer as? SplatRenderer)?.saveRecommendedMaskPercentage(percentage)
+    }
+    
+    /// Converts a percentage (0-100) to an absolute mask threshold using percentiles if available
+    public func getMaskThreshold(forPercentage percentage: Double) -> Float {
+        guard let splatRenderer = modelRenderer as? SplatRenderer,
+              !splatRenderer.sortedMaskValues.isEmpty else {
+            return Float(percentage / 100.0) * maxMaskValue
+        }
+        let sorted = splatRenderer.sortedMaskValues
+        let clamped = max(0.0, min(100.0, percentage))
+        let targetIndex = Int((clamped / 100.0) * Double(sorted.count - 1))
+        return sorted[max(0, min(targetIndex, sorted.count - 1))]
+    }
+    
     /// Returns true if CoreML models are available for semantic clustering
     public var hasCLIPModels: Bool {
         clipService.hasImageEncoder && clipService.hasTextEncoder
@@ -92,6 +131,10 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     public var onEncodingComplete: (() -> Void)?
     /// Callback invoked on main thread with status text during encoding
     public var onStatusUpdate: ((String) -> Void)?
+    /// Callback invoked with deformation FPS each frame
+    public var onDeformFPSUpdate: ((Double) -> Void)?
+    /// Callback invoked with deformed/total splat counts each frame
+    public var onDeformedSplatCountUpdate: ((Int, Int) -> Void)?
 
     init?(_ metalKitView: MTKView) {
         self.device = metalKitView.device!
@@ -244,10 +287,22 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         
         if let splatRenderer = modelRenderer as? SplatRenderer {
             splatRenderer.useClusterColors = showClusterColors
+            splatRenderer.showMask = showMask
             splatRenderer.selectedClusterID = selectedClusterID
             splatRenderer.useDepthVisualization = showDepthVisualization
             splatRenderer.selectionMode = selectionMode
+            splatRenderer.useMaskedDeformation = useMaskedDeformation
+            splatRenderer.maskThreshold = maskThreshold
             splatRenderer.update(time: timeToPass, commandBuffer: commandBuffer)
+            
+            // Push deformation FPS and splat counts to UI every frame
+            let fps = splatRenderer.currentDeformFPS
+            let deformedCount = splatRenderer.deformedSplatCount
+            let totalCount = splatRenderer.totalSplatCount
+            DispatchQueue.main.async { [weak self] in
+                self?.onDeformFPSUpdate?(fps)
+                self?.onDeformedSplatCountUpdate?(deformedCount, totalCount)
+            }
         }
 
         // Rendering Step
@@ -349,6 +404,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         let elapsed = now - fpsLastTimestamp
         guard elapsed >= 1.0 else { return }
         let fps = Double(fpsFrameCount) / elapsed
+        renderFPS = fps
         Self.log.debug("MTKView draw FPS: \(fps)")
         fpsFrameCount = 0
         fpsLastTimestamp = now

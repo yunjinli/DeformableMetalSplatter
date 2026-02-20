@@ -30,6 +30,7 @@ public class DeformGraphSystem {
     // 131072 should work on most devices; reduce if GPU crashes
     let SAFE_BATCH_SIZE = 16384
     var flatten = true
+    public private(set) var lastMaskedCount: Int = 0
     public init(device: MTLDevice, useFP16: Bool) {
         self.device = device
         self.mpsDevice = MPSGraphDevice(mtlDevice: device)
@@ -188,18 +189,23 @@ public class DeformGraphSystem {
         return MPSGraphTensorData(ndArray)
     }
     
+    /// Returns elapsed time in milliseconds
+    @discardableResult
     public func run(commandQueue: MTLCommandQueue,
                     xyzBuffer: MTLBuffer,
                     tBuffer: MTLBuffer,
                     outXYZ: MTLBuffer,
                     outRot: MTLBuffer,
                     outScale: MTLBuffer,
-                    count: Int) {
+                    count: Int) -> Double {
         
-        guard let exec = executable else { return }
+        guard let exec = executable else { return 0 }
         let totalStart = CFAbsoluteTimeGetCurrent()
         let floatSize = MemoryLayout<Float>.size
         let numBatches = (count + SAFE_BATCH_SIZE - 1) / SAFE_BATCH_SIZE
+
+        let cb = MPSCommandBuffer(from: commandQueue)
+        cb.label = "DeformGraphSystem.run"
 
         for i in stride(from: 0, to: count, by: SAFE_BATCH_SIZE) {
             autoreleasepool {
@@ -262,23 +268,181 @@ public class DeformGraphSystem {
                 resultsArray.append(outScaleData)
                 
                 if inputsArray.count == (exec.feedTensors?.count ?? 0) {
-                    let _ = exec.run(with: commandQueue,
-                                     inputs: inputsArray,
-                                     results: resultsArray,
-                                     executionDescriptor: nil)
+                    exec.encode(to: cb,
+                                inputs: inputsArray,
+                                results: resultsArray,
+                                executionDescriptor: nil)
                 }
                 
                 let batchElapsedMs = (CFAbsoluteTimeGetCurrent() - batchStart) * 1000.0
                 if numBatches > 1 {
-                    print("DeformGraph batch \(i / SAFE_BATCH_SIZE): \(batchElapsedMs) ms")
+                    print("DeformGraph batch \(i / SAFE_BATCH_SIZE) encoded: \(batchElapsedMs) ms")
                 }
             }
         }
 
+        cb.commit()
+        cb.waitUntilCompleted()
+
         let totalElapsedMs = (CFAbsoluteTimeGetCurrent() - totalStart) * 1000.0
         print("DeformGraph total (\(numBatches) batches): \(totalElapsedMs) ms")
+        return totalElapsedMs
     }
-    
+
+    /// Run deformation network only on a subset of indices (for masked deformation)
+    /// - Parameters:
+    ///   - commandQueue: Metal command queue
+    ///   - xyzBuffer: Input XYZ positions (full buffer)
+    ///   - tBuffer: Input time buffer (full buffer)
+    ///   - outXYZ: Output position deltas (full buffer)
+    ///   - outRot: Output rotation deltas (full buffer)
+    ///   - outScale: Output scale deltas (full buffer)
+    ///   - maskBuffer: Mask buffer (1.0 = deform, 0.0 = skip)
+    ///   - count: Total number of splats
+    /// Returns elapsed time in milliseconds
+    @discardableResult
+    public func runMasked(commandQueue: MTLCommandQueue,
+                          xyzBuffer: MTLBuffer,
+                          tBuffer: MTLBuffer,
+                          outXYZ: MTLBuffer,
+                          outRot: MTLBuffer,
+                          outScale: MTLBuffer,
+                          maskBuffer: MTLBuffer,
+                          threshold: Float,
+                          count: Int) -> Double {
+
+        guard let exec = executable else { return 0 }
+
+        // First, count how many masked splats we have and gather their indices
+        let maskData = maskBuffer.contents().assumingMemoryBound(to: Float.self)
+        var maskedIndices: [Int] = []
+        maskedIndices.reserveCapacity(count / 10)  // Assume ~10% are dynamic
+
+        for i in 0..<count {
+            if maskData[i] > threshold {
+                maskedIndices.append(i)
+            }
+        }
+
+        let maskedCount = maskedIndices.count
+        lastMaskedCount = maskedCount
+        guard maskedCount > 0 else {
+            print("DeformGraph: No masked splats to deform")
+            return 0
+        }
+
+        print("DeformGraph: Running masked deformation on \(maskedCount)/\(count) splats")
+
+        let floatSize = MemoryLayout<Float>.size
+
+        // Create temporary buffers for the masked subset
+        // Pad to next SAFE_BATCH_SIZE boundary to avoid MPS alignment issues
+        let paddedCount = ((maskedCount + SAFE_BATCH_SIZE - 1) / SAFE_BATCH_SIZE) * SAFE_BATCH_SIZE
+        let tempXYZ = device.makeBuffer(length: paddedCount * 3 * floatSize, options: .storageModeShared)!
+        let tempT = device.makeBuffer(length: paddedCount * 1 * floatSize, options: .storageModeShared)!
+        let tempOutXYZ = device.makeBuffer(length: paddedCount * 3 * floatSize, options: .storageModeShared)!
+        let tempOutRot = device.makeBuffer(length: paddedCount * 4 * floatSize, options: .storageModeShared)!
+        let tempOutScale = device.makeBuffer(length: paddedCount * 3 * floatSize, options: .storageModeShared)!
+
+        // Copy masked data to temp buffers using memcpy for efficiency
+        let xyzSrc = xyzBuffer.contents()
+        let tSrc = tBuffer.contents()
+        let xyzDst = tempXYZ.contents()
+        let tDst = tempT.contents()
+
+        // Use memcpy for each masked index - more efficient than element-by-element
+        for (i, idx) in maskedIndices.enumerated() {
+            let srcOffsetXYZ = idx * 3 * floatSize
+            let dstOffsetXYZ = i * 3 * floatSize
+            memcpy(xyzDst.advanced(by: dstOffsetXYZ), xyzSrc.advanced(by: srcOffsetXYZ), 3 * floatSize)
+
+            let srcOffsetT = idx * 1 * floatSize
+            let dstOffsetT = i * 1 * floatSize
+            memcpy(tDst.advanced(by: dstOffsetT), tSrc.advanced(by: srcOffsetT), 1 * floatSize)
+        }
+
+        // Run deformation on the masked subset
+        let totalStart = CFAbsoluteTimeGetCurrent()
+        let numBatches = (maskedCount + SAFE_BATCH_SIZE - 1) / SAFE_BATCH_SIZE
+
+        let cb = MPSCommandBuffer(from: commandQueue)
+        cb.label = "DeformGraphSystem.runMasked"
+
+        for batchStartIdx in stride(from: 0, to: maskedCount, by: SAFE_BATCH_SIZE) {
+            autoreleasepool {
+                let currentCount = min(SAFE_BATCH_SIZE, maskedCount - batchStartIdx)
+
+                let xyzShape = [NSNumber(value: currentCount * 3)]
+                let tShape = [NSNumber(value: currentCount * 1)]
+                let outRotShape = [NSNumber(value: currentCount * 4)]
+                let outScaleShape = [NSNumber(value: currentCount * 3)]
+
+                let xyzData = createTensorView(buffer: tempXYZ, offset: batchStartIdx * 3 * floatSize, shape: xyzShape)
+                let tData = createTensorView(buffer: tempT, offset: batchStartIdx * 1 * floatSize, shape: tShape)
+
+                let outXYZData = createTensorView(buffer: tempOutXYZ, offset: batchStartIdx * 3 * floatSize, shape: xyzShape)
+                let outRotData = createTensorView(buffer: tempOutRot, offset: batchStartIdx * 4 * floatSize, shape: outRotShape)
+                let outScaleData = createTensorView(buffer: tempOutScale, offset: batchStartIdx * 3 * floatSize, shape: outScaleShape)
+
+                var inputsArray: [MPSGraphTensorData] = []
+                var resultsArray: [MPSGraphTensorData] = []
+
+                if let feedTensors = exec.feedTensors {
+                    for tensor in feedTensors {
+                        let opName = tensor.operation.name
+                        if opName == "in_xyz" || opName == "in_xyz_flat" { inputsArray.append(xyzData) }
+                        else if opName == "in_t" || opName == "in_t_flat" { inputsArray.append(tData) }
+                        else if (tensor.shape?[1].intValue ?? 0) == 3 { inputsArray.append(xyzData) }
+                        else { inputsArray.append(tData) }
+                    }
+                }
+
+                resultsArray.append(outXYZData)
+                resultsArray.append(outRotData)
+                resultsArray.append(outScaleData)
+
+                if inputsArray.count == (exec.feedTensors?.count ?? 0) {
+                    exec.encode(to: cb,
+                                inputs: inputsArray,
+                                results: resultsArray,
+                                executionDescriptor: nil)
+                }
+            }
+        }
+
+        cb.commit()
+        cb.waitUntilCompleted()
+
+        // Copy results back to full output buffers at correct positions using memcpy
+        let outXYZBase = outXYZ.contents()
+        let outRotBase = outRot.contents()
+        let outScaleBase = outScale.contents()
+        let tempOutXYZData = tempOutXYZ.contents()
+        let tempOutRotData = tempOutRot.contents()
+        let tempOutScaleData = tempOutScale.contents()
+
+        for (i, idx) in maskedIndices.enumerated() {
+            // Copy XYZ
+            let dstOffsetXYZ = idx * 3 * floatSize
+            let srcOffsetXYZ = i * 3 * floatSize
+            memcpy(outXYZBase.advanced(by: dstOffsetXYZ), tempOutXYZData.advanced(by: srcOffsetXYZ), 3 * floatSize)
+
+            // Copy Rot
+            let dstOffsetRot = idx * 4 * floatSize
+            let srcOffsetRot = i * 4 * floatSize
+            memcpy(outRotBase.advanced(by: dstOffsetRot), tempOutRotData.advanced(by: srcOffsetRot), 4 * floatSize)
+
+            // Copy Scale
+            let dstOffsetScale = idx * 3 * floatSize
+            let srcOffsetScale = i * 3 * floatSize
+            memcpy(outScaleBase.advanced(by: dstOffsetScale), tempOutScaleData.advanced(by: srcOffsetScale), 3 * floatSize)
+        }
+
+        let totalElapsedMs = (CFAbsoluteTimeGetCurrent() - totalStart) * 1000.0
+        print("DeformGraph masked total (\(numBatches) batches): \(totalElapsedMs) ms")
+        return totalElapsedMs
+    }
+
     func positionalEncoding(input: MPSGraphTensor, numFreqs: Int, dataType: MPSDataType) -> MPSGraphTensor {
         var tensors = [input]
         for i in 0..<numFreqs {

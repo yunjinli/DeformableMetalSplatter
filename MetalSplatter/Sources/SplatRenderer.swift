@@ -56,9 +56,10 @@ public class SplatRenderer {
         case clusterColor = 3
         case clusterID = 4
         case selectedClusters = 5
+        case deformMask = 6  // For mask visualization
     }
 
-    // Keep in sync with Shaders.metal : Uniforms (176 bytes total)
+    // Keep in sync with Shaders.metal : Uniforms (184 bytes total)
     struct Uniforms {
         var projectionMatrix: matrix_float4x4  // 64 bytes (offset 0)
         var viewMatrix: matrix_float4x4        // 64 bytes (offset 64)
@@ -67,15 +68,16 @@ public class SplatRenderer {
         var splatCount: UInt32                 // 4 bytes  (offset 136)
         var indexedSplatCount: UInt32          // 4 bytes  (offset 140)
         var showClusterColors: UInt32          // 4 bytes  (offset 144)
-        var selectedClusterID: Int32           // 4 bytes  (offset 148) -1 means show all clusters (single selection)
-        
-        var showDepthVisualization: UInt32     // 4 bytes  (offset 152)
-        var selectionMode: UInt32 = 0          // 4 bytes  (offset 156) 0=off, 1=selecting, 2=confirmed
-        var depthRange: SIMD2<Float>           // 8 bytes  (offset 160) min/max depth
-        
-        var selectedClusterCount: UInt32 = 0   // 4 bytes  (offset 168) number of selected clusters
-        var _pad2: UInt32 = 0                  // 4 bytes  (offset 172) padding
-        // Total: 176 bytes
+        var showMask: UInt32                   // 4 bytes  (offset 148) - show dynamic splats in red
+        var selectedClusterID: Int32           // 4 bytes  (offset 152) -1 means show all clusters (single selection)
+
+        var showDepthVisualization: UInt32     // 4 bytes  (offset 156)
+        var selectionMode: UInt32 = 0          // 4 bytes  (offset 160) 0=off, 1=selecting, 2=confirmed
+        var depthRange: SIMD2<Float>           // 8 bytes  (offset 168) min/max depth
+
+        var selectedClusterCount: UInt32 = 0   // 4 bytes  (offset 176)
+        var maskThreshold: Float = 0             // 4 bytes  (offset 180) mask threshold
+        // Total: 184 bytes
     }
 
 
@@ -142,10 +144,16 @@ public class SplatRenderer {
 
     public var useClusterColors: Bool = false
     public var selectedClusterID: Int32 = -1  // -1 means show all clusters
-    
+    public var showMask: Bool = false  // When true, show dynamic splats in red, static in original color
+
     /// Returns true if cluster data (clusters.bin) was successfully loaded
     public var hasClusters: Bool {
         clusterColorBuffer != nil && clusterIdBuffer != nil
+    }
+
+    /// Returns true if mask data (mask.bin) was successfully loaded
+    public var hasMask: Bool {
+        deformMaskBuffer != nil
     }
     public var useDepthVisualization: Bool = false
     private var currentDepthRange: SIMD2<Float> = SIMD2(0.1, 10.0)  // Default near/far
@@ -165,9 +173,27 @@ public class SplatRenderer {
     var bufDScale: MTLBuffer?
     var clusterIdBuffer: MTLBuffer?
     var clusterColorBuffer: MTLBuffer?
+    var deformMaskBuffer: MTLBuffer?
+    var allOnesMaskBuffer: MTLBuffer?
+    /// If true, use mask.bin for deformation at t>0; if false, always deform all splats
+    public var useMaskedDeformation: Bool = false
+    /// Threshold for dynamic thresholding: splats with mask value > threshold are deformed.
+    /// mask.bin now stores continuous deformation magnitudes.
+    public var maskThreshold: Float = 0.0
+    /// Maximum mask value in the loaded mask.bin (for UI slider scaling)
+    public var maxMaskValue: Float = 1.0
+    /// Sorted mask values for percentile scaling
+    public var sortedMaskValues: [Float] = []
+    /// Recommended percentile offset derived from configuration script
+    public var recommendedMaskPercentage: Double? = nil
+    /// URL where the recommended mask percentage should be saved
+    public var maskJsonURL: URL? = nil
     private let emptyClusterColorBuffer: MTLBuffer
     private let emptyClusterIdBuffer: MTLBuffer
     private var lastDeformationTime: Float = -1.0
+    // Deformation FPS tracking (based on actual graph runtime)
+    private var deformFPS: Double = 0.0
+    private var _deformedSplatCount: Int = 0
     
     // Picking support (screen-space based)
     private var maxClusterID: UInt32 = 0
@@ -180,6 +206,8 @@ public class SplatRenderer {
     /// Buffer to pass selected cluster IDs to GPU
     private var selectedClustersBuffer: MTLBuffer?
     private let emptySelectedClustersBuffer: MTLBuffer
+    /// Empty buffer for deform mask (used when no mask is loaded)
+    private let emptyDeformMaskBuffer: MTLBuffer
     /// Max selected clusters (must match shader constant)
     private static let maxSelectedClusters = 64
 
@@ -299,6 +327,9 @@ public class SplatRenderer {
                                                       options: .storageModeShared)!
         self.emptySelectedClustersBuffer = device.makeBuffer(length: MemoryLayout<UInt32>.size * Self.maxSelectedClusters,
                                                              options: .storageModeShared)!
+        // Empty deform mask buffer - enough for 1M splats as fallback
+        self.emptyDeformMaskBuffer = device.makeBuffer(length: MemoryLayout<Float>.size * 1_000_000,
+                                                       options: .storageModeShared)!
 
         do {
             library = try device.makeDefaultLibrary(bundle: Bundle.module)
@@ -452,7 +483,7 @@ public class SplatRenderer {
         let resultPtr = resultBuffer.contents().assumingMemoryBound(to: UInt32.self)
         resultPtr[0] = UInt32.max
         
-        // Create uniforms - must match Metal struct layout exactly (176 bytes)
+        // Create uniforms - must match Metal struct layout exactly (184 bytes)
         var uniforms = Uniforms(
             projectionMatrix: viewport.projectionMatrix,
             viewMatrix: viewport.viewMatrix,
@@ -460,12 +491,13 @@ public class SplatRenderer {
             splatCount: UInt32(splatBuffer.count),
             indexedSplatCount: UInt32(min(splatBuffer.count, Constants.maxIndexedSplatCount)),
             showClusterColors: 0,
+            showMask: 0,
             selectedClusterID: -1,
             showDepthVisualization: 0,
             selectionMode: 0,
             depthRange: SIMD2(0.1, 10.0),
             selectedClusterCount: 0,
-            _pad2: 0
+            maskThreshold: 0
         )
         
         var params = PickingParams(
@@ -486,7 +518,7 @@ public class SplatRenderer {
         encoder.setComputePipelineState(computePipeline)
         encoder.setBuffer(splatBuffer.buffer, offset: 0, index: 0)
         encoder.setBuffer(clusterIDs, offset: 0, index: 1)
-        encoder.setBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 2)
+        encoder.setBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 2)
         encoder.setBytes(&params, length: MemoryLayout<PickingParams>.size, index: 3)
         encoder.setBuffer(scoreBuffer, offset: 0, index: 4)
         encoder.setBuffer(resultBuffer, offset: 0, index: 5)
@@ -652,11 +684,13 @@ public class SplatRenderer {
                                     splatCount: splatCount,
                                     indexedSplatCount: indexedSplatCount,
                                     showClusterColors: useClusterColors ? 1 : 0,
+                                    showMask: showMask ? 1 : 0,
                                     selectedClusterID: selectedClusterID,
                                     showDepthVisualization: useDepthVisualization ? 1 : 0,
                                     selectionMode: selectionMode,
                                     depthRange: currentDepthRange,
-                                    selectedClusterCount: UInt32(min(selectedClusters.count, Self.maxSelectedClusters)))
+                                    selectedClusterCount: UInt32(min(selectedClusters.count, Self.maxSelectedClusters)),
+                                    maskThreshold: maskThreshold)
             self.uniforms.pointee.setUniforms(index: i, uniforms)
         }
 
@@ -777,11 +811,12 @@ public class SplatRenderer {
         let count = canonicalBuffer?.count ?? 0
         
         if count > 0 {
-            bufXYZ = device.makeBuffer(length: count * 3 * 4, options: .storageModePrivate)
-            bufT   = device.makeBuffer(length: count * 1 * 4, options: .storageModePrivate)
-            bufDXYZ = device.makeBuffer(length: count * 3 * 4, options: .storageModePrivate)
-            bufDRot = device.makeBuffer(length: count * 4 * 4, options: .storageModePrivate)
-            bufDScale = device.makeBuffer(length: count * 3 * 4, options: .storageModePrivate)
+            // Use shared storage mode for masked deformation support (allows CPU read/write)
+            bufXYZ = device.makeBuffer(length: count * 3 * 4, options: .storageModeShared)
+            bufT   = device.makeBuffer(length: count * 1 * 4, options: .storageModeShared)
+            bufDXYZ = device.makeBuffer(length: count * 3 * 4, options: .storageModeShared)
+            bufDRot = device.makeBuffer(length: count * 4 * 4, options: .storageModeShared)
+            bufDScale = device.makeBuffer(length: count * 3 * 4, options: .storageModeShared)
         }
         
         if count > 0,
@@ -815,6 +850,11 @@ public class SplatRenderer {
             print("About to load clusters from: \(clustersURL)")
             loadClustersBin(from: clustersURL, expectedCount: count)
         }
+
+        // Load deformation mask (mask.bin)
+        let maskURL = directory.appendingPathComponent("mask.bin")
+        let maskCount = canonicalBuffer?.count ?? 0
+        loadDeformMaskBin(from: maskURL, expectedCount: maskCount)
 
         print("Loaded Deformable Scene: \(canonicalBuffer!.count) points")
     }
@@ -925,7 +965,74 @@ public class SplatRenderer {
         
         Self.log.info("Loaded clusters.bin (\(count) entries).")
     }
-    
+
+    private func loadDeformMaskBin(from url: URL, expectedCount: Int) {
+        // Create all-ones mask buffer (used for t=0 to deform all splats)
+        let allOnes = [Float](repeating: 1.0, count: expectedCount)
+        let allOnesBytes = expectedCount * MemoryLayout<Float>.size
+        allOnesMaskBuffer = device.makeBuffer(bytes: allOnes, length: allOnesBytes, options: .storageModeShared)
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+            Self.log.info("Read \(data.count) bytes from mask.bin")
+        } catch {
+            Self.log.info("No mask.bin found or failed to read: \(error.localizedDescription)")
+            return
+        }
+
+        let expectedBytes = expectedCount * MemoryLayout<Float>.size
+        guard data.count >= expectedBytes else {
+            Self.log.error("mask.bin too small: \(data.count) bytes, expected \(expectedBytes)")
+            return
+        }
+
+        let maskValues = data.withUnsafeBytes { raw in
+            let base = raw.baseAddress!.assumingMemoryBound(to: Float.self)
+            return Array(UnsafeBufferPointer(start: base, count: expectedCount))
+        }
+
+        deformMaskBuffer = device.makeBuffer(bytes: maskValues, length: expectedBytes, options: .storageModeShared)
+        
+        // Compute percentiles for slider mapping
+        self.sortedMaskValues = maskValues.sorted()
+        
+        // Max value for fallback
+        self.maxMaskValue = self.sortedMaskValues.last ?? 1.0
+        if self.maxMaskValue < 1e-8 { self.maxMaskValue = 1.0 }
+        
+        // Read recommended value if available
+        let jsonURL = url.deletingPathExtension().appendingPathExtension("json")
+        self.maskJsonURL = jsonURL
+        if let data = try? Data(contentsOf: jsonURL),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let percentage = obj["recommended_percentile"] as? Double {
+            self.recommendedMaskPercentage = percentage
+            Self.log.info("Loaded custom mask recommendation: \(percentage)%")
+        } else {
+            self.recommendedMaskPercentage = nil
+        }
+        
+        Self.log.info("Loaded deform mask (\(expectedCount) entries, max=\(self.maxMaskValue)).")
+    }
+
+    /// Saves a new recommended mask percentage to mask.json
+    public func saveRecommendedMaskPercentage(_ percentage: Double) {
+        guard let url = maskJsonURL else {
+            Self.log.error("Failed to save mask recommendation: no mask.json URL available.")
+            return
+        }
+        let dict: [String: Any] = ["recommended_percentile": percentage]
+        do {
+            let data = try JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted)
+            try data.write(to: url)
+            self.recommendedMaskPercentage = percentage
+            Self.log.info("Saved custom mask recommendation: \(percentage)% to \(url.path)")
+        } catch {
+            Self.log.error("Failed to save mask recommendation: \(error.localizedDescription)")
+        }
+    }
+
     public func update(time: Float, commandBuffer: MTLCommandBuffer) {
         // Check if time changed significantly
         if abs(time - lastDeformationTime) < 0.001 { return }
@@ -951,39 +1058,56 @@ public class SplatRenderer {
             return
         }
         // Fill t buffer (xyz is static and extracted once during load)
-        if let timeCmd = commandQueue.makeCommandBuffer(),
-           let enc = timeCmd.makeComputeCommandEncoder() {
+        // Use the same command buffer to enable pipelining - no separate wait needed
+        if let enc = commandBuffer.makeComputeCommandEncoder() {
             enc.label = "Update: Fill Time"
             enc.setComputePipelineState(timeFillPipe)
             enc.setBuffer(bT, offset: 0, index: 0)
             var t = time
             enc.setBytes(&t, length: 4, index: 1)
-            
+
             let w = timeFillPipe.threadExecutionWidth
             enc.dispatchThreads(MTLSize(width: count, height: 1, depth: 1),
                                 threadsPerThreadgroup: MTLSize(width: w, height: 1, depth: 1))
             enc.endEncoding()
-            let start = CFAbsoluteTimeGetCurrent()
-            timeCmd.commit()
-            timeCmd.waitUntilCompleted()
-            let elapsedMs = (CFAbsoluteTimeGetCurrent() - start) * 1000.0
-            Self.log.debug("Deform fill_time: \(elapsedMs) ms")
         }
         
         // Calculate d_xyz, d_rotation, d_scaling
-        let graphStart = CFAbsoluteTimeGetCurrent()
-        sys.run(commandQueue: commandQueue,
-                xyzBuffer: bXYZ,
-                tBuffer: bT,
-                outXYZ: bDXYZ,
-                outRot: bDRot,
-                outScale: bDScale,
-                count: count)
-        let graphElapsedMs = (CFAbsoluteTimeGetCurrent() - graphStart) * 1000.0
-        Self.log.debug("Deform graph: \(graphElapsedMs) ms")
-        
+        // For t=0: run on all splats
+        // For t>0 with masked deformation: only run on masked splats
+        let useMasked = useMaskedDeformation && time > 0.001 && deformMaskBuffer != nil
+
+        let graphElapsedMs: Double
+        if useMasked {
+            // Run only on masked splats for better performance
+            graphElapsedMs = sys.runMasked(commandQueue: commandQueue,
+                          xyzBuffer: bXYZ,
+                          tBuffer: bT,
+                          outXYZ: bDXYZ,
+                          outRot: bDRot,
+                          outScale: bDScale,
+                          maskBuffer: deformMaskBuffer!,
+                          threshold: maskThreshold,
+                          count: count)
+        } else {
+            // Run on all splats
+            graphElapsedMs = sys.run(commandQueue: commandQueue,
+                    xyzBuffer: bXYZ,
+                    tBuffer: bT,
+                    outXYZ: bDXYZ,
+                    outRot: bDRot,
+                    outScale: bDScale,
+                    count: count)
+        }
+
         // Apply deformation to canonical Gaussians
-        if let enc = commandBuffer.makeComputeCommandEncoder() {
+        // The shader always applies deltas unconditionally. When runMasked is used,
+        // static splats retain their t=0 deltas in the buffer, so they keep their
+        // t=0 appearance automatically. We just pass any valid mask buffer.
+        let maskBuffer: MTLBuffer? = allOnesMaskBuffer
+
+        if let enc = commandBuffer.makeComputeCommandEncoder(),
+           let bMask = maskBuffer {
             enc.label = "Update: Apply Outputs"
             enc.setComputePipelineState(applyPipe)
             enc.setBuffer(cBuffer, offset: 0, index: 0)
@@ -991,16 +1115,41 @@ public class SplatRenderer {
             enc.setBuffer(bDRot, offset: 0, index: 2)
             enc.setBuffer(bDScale, offset: 0, index: 3)
             enc.setBuffer(splatBuffer.buffer, offset: 0, index: 4)
+            enc.setBuffer(bMask, offset: 0, index: 5)
 
-            
             let w = applyPipe.threadExecutionWidth
-            let applyStart = CFAbsoluteTimeGetCurrent()
             enc.dispatchThreads(MTLSize(width: count, height: 1, depth: 1),
                                 threadsPerThreadgroup: MTLSize(width: w, height: 1, depth: 1))
             enc.endEncoding()
-            let applyElapsedMs = (CFAbsoluteTimeGetCurrent() - applyStart) * 1000.0
-            Self.log.debug("Deform apply encode: \(applyElapsedMs) ms")
         }
+
+        // Update deformation FPS from actual graph runtime (FPS = 1 / (ms/1000))
+        if graphElapsedMs > 0.01 {
+            deformFPS = 1.0 / (graphElapsedMs / 1000.0)
+            print("Deform FPS: \(deformFPS) (from \(graphElapsedMs) ms)")
+        }
+
+        // Track how many splats were deformed this frame
+        if useMasked {
+            _deformedSplatCount = sys.lastMaskedCount
+        } else {
+            _deformedSplatCount = count
+        }
+    }
+
+    /// Returns the current deformation FPS, or 0 if no deformation is running
+    public var currentDeformFPS: Double {
+        return deformFPS
+    }
+
+    /// Returns the number of splats deformed in the last frame
+    public var deformedSplatCount: Int {
+        return _deformedSplatCount
+    }
+
+    /// Returns the total splat count
+    public var totalSplatCount: Int {
+        return splatBuffer.count
     }
 
     private static func cameraWorldForward(forViewMatrix view: simd_float4x4) -> simd_float3 {
@@ -1164,7 +1313,11 @@ public class SplatRenderer {
         // Bind selected clusters buffer for multi-selection
         let selClustersBuffer = selectedClustersBuffer ?? emptySelectedClustersBuffer
         renderEncoder.setVertexBuffer(selClustersBuffer, offset: 0, index: BufferIndex.selectedClusters.rawValue)
-        
+
+        // Bind deform mask buffer (used for mask visualization)
+        let maskBuffer = deformMaskBuffer ?? emptyDeformMaskBuffer
+        renderEncoder.setVertexBuffer(maskBuffer, offset: 0, index: BufferIndex.deformMask.rawValue)
+
         if let sortedBuffer = sortedIndexBuffer?.buffer {
             renderEncoder.setVertexBuffer(sortedBuffer, offset: 0, index: BufferIndex.splatIndices.rawValue)
         }
