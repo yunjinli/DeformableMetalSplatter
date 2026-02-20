@@ -12,9 +12,8 @@ Render deformable 3D Gaussian Splats using Metal on Apple platforms. Tested on :
 Please follow the steps in original [README](./README_Orig.md) to setup the project in xcode. 
 
 # TODOS
-- [ ] add optional speedup via static vs dynamic splat masking (export_static_mask.py ready, Swift integration pending)
 - [ ] Update BibTex after 3DV proceedings are published
-- [ ] ...
+- [ ] consider other improvements ...
 
 # Usage
 By selecting a folder in the startup page, the app loads the ```weights.bin```, ```clusters.bin``` and ```point_cloud.ply``` inside the directory. You can download example scenes from [here](https://drive.google.com/drive/folders/1WNnabmOoLe5aX9xD_rgFajjIEYVGgpVJ?usp=sharing) trained with [TRASE](https://github.com/yunjinli/TRASE). 
@@ -98,6 +97,21 @@ https://github.com/user-attachments/assets/789c4074-9b70-4b5d-b072-4bc0e3782901
 
 https://github.com/user-attachments/assets/d3423e47-947e-4d1c-a842-eedab2826cf9
 
+## Optional Static Splat Masking Speedup on Macbook Pro M5
+
+-> notice the deformation network FPS speedup in the top right corner
+
+https://github.com/user-attachments/assets/5721c452-af9a-44d6-a1c5-3395be2fcfc0
+
+
+
+## Optional Static Splat Masking Speedup on iPhone 17 Air 
+
+-> notice the deformation network FPS speedup in the top right corner
+
+https://github.com/user-attachments/assets/b18e0a2b-4fe0-4200-9553-523d58b503f3
+
+
 
 # Acknowledgments
 This project is a fork of MetalSplatter created by Sean Cier.
@@ -108,7 +122,7 @@ Modifications and new features are licensed under MIT License (Copyright © 2026
 
 # References
 
-If you find this useful for your own work, particularly the 3D segmentation please consider taking a look at TRASE's [code](https://github.com/yunjinli/TRASE), [paper](https://arxiv.org/pdf/2411.19290), and [website](https://yunjinli.github.io/project-sadg/). Give us a star if you find it interesting :)
+If you find this useful for your own work, particularly the 3D segmentation please consider taking a look at TRASE's [code](https://github.com/yunjinli/TRASE), [paper](https://arxiv.org/pdf/2411.19290), and [website](https://yunjinli.github.io/project-sadg/). Give us a star if you find it interesting :) Also feel free to open an issue or contribute to our project if you have an idea for a useful feature or developed on yourself :) 
 
 ```
 @article{li2024trase,
