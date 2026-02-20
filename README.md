@@ -55,6 +55,21 @@ Download the Mobileclip coreml models from [our google drive link](https://drive
 
 You can then move to a certain view and run the ```Encode Clusters CLIP``` button to encode the features, after which the search bar can be used to query clusters with text. ```topk``` setting can be used to decide which amount of clusters can be queried.  
 
+### Step 5 : Optional dynamic vs static splat speedup (perform step 3 first)
+
+Generate the deformation mask, make sure params are named as such :
+
+```bash
+PLY_PATH="$SCENE_DIR/point_cloud.ply"
+MODEL_PATH="$SCENE_DIR/deform.pth"
+OUTPUT_PATH="$SCENE_DIR/mask.bin"
+```
+
+```bash
+python generate_deformation_mask.py \"$PLY_PATH\" \"$MODEL_PATH\" \"$OUTPUT_PATH\" --smooth --threshold 0.1 --max-t 1.0 --num-samples 10
+```
+
+
 # Demo
 
 ## Dynamic Splats + Instances on iPhone 17 Air 
