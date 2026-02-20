@@ -98,6 +98,21 @@ https://github.com/user-attachments/assets/789c4074-9b70-4b5d-b072-4bc0e3782901
 
 https://github.com/user-attachments/assets/d3423e47-947e-4d1c-a842-eedab2826cf9
 
+## Optional Static Splat Masking Speedup on Macbook Pro M5
+
+-> notice the deformation network FPS speedup in the top right corner
+
+https://github.com/user-attachments/assets/5721c452-af9a-44d6-a1c5-3395be2fcfc0
+
+
+
+## Optional Static Splat Masking Speedup on iPhone 17 Air 
+
+-> notice the deformation network FPS speedup in the top right corner
+
+https://github.com/user-attachments/assets/b18e0a2b-4fe0-4200-9553-523d58b503f3
+
+
 
 # Acknowledgments
 This project is a fork of MetalSplatter created by Sean Cier.
