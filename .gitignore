@@ -28,5 +28,5 @@ cluster_features.npz
 output.png
 result.png
 result_coreml.png
-
+*.zip
 # HuggingFace model hub files (already ignored above)

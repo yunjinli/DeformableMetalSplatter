@@ -1,5 +1,5 @@
 # Deformable Instance MetalSplatter
-This project is forked from an amazing work [MetalSplatter](https://github.com/scier/MetalSplatter). It provides support for running deformable splats as well as instance segmented splats. 
+This project is forked from an amazing work [MetalSplatter](https://github.com/scier/MetalSplatter). It provides support for running deformable splats as well as instance segmented splats. This is also a dedicated GUI for the paper [TRASE](https://yunjinli.github.io/project-sadg/) adapted from its original [GUI](https://github.com/yunjinli/TRASE/blob/master/gui.py) based on [DearPyGui](https://github.com/hoffstadt/DearPyGui) and CUDA. 
 
 Render deformable 3D Gaussian Splats using Metal on Apple platforms. Tested on : 
 - Iphone 15, Iphone 17 Air 
@@ -12,8 +12,8 @@ Render deformable 3D Gaussian Splats using Metal on Apple platforms. Tested on :
 Please follow the steps in original [README](./README_Orig.md) to setup the project in xcode. 
 
 # TODOS
-- [ ] Update BibTex after 3DV proceedings are published
-- [ ] consider other improvements ...
+- [ ] [Feature : switch to newer mobileclip2 model](https://github.com/yunjinli/DeformableMetalSplatter/issues/15)
+- [ ] [Feature: Segmentation Threshold as a configurable setting](https://github.com/yunjinli/DeformableMetalSplatter/issues/8)
 
 # Usage
 By selecting a folder in the startup page, the app loads the ```weights.bin```, ```clusters.bin``` and ```point_cloud.ply``` inside the directory. You can download example scenes from [here](https://drive.google.com/drive/folders/1WNnabmOoLe5aX9xD_rgFajjIEYVGgpVJ?usp=sharing) trained with [TRASE](https://github.com/yunjinli/TRASE). 
@@ -29,7 +29,7 @@ The gestures for X/Y Panning, Orbit, Zoom in/out are also implemented. As some s
 ```
 conda create -n trase_model_converter python=3.10 -y
 conda activate trase_model_converter
-pip install torch "numpy<2" torchinfo
+pip install torch "numpy<2" torchinfo plyfile
 ```
 
 ### Step 2: For dynamic splat scenes  
