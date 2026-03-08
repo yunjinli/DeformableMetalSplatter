@@ -2,6 +2,9 @@
 
 import SwiftUI
 import MetalKit
+#if os(iOS)
+import CoreMotion
+#endif
 
 #if os(macOS)
 private typealias ViewRepresentable = NSViewRepresentable
@@ -59,6 +62,7 @@ struct MetalKitSceneView: View {
     @State private var renderFPS: Double = 0.0  // Rendering FPS from renderer
     @State private var deformedSplatCount: Int = 0
     @State private var totalSplatCount: Int = 0
+    @State private var useDeviceRotation: Bool = false
     
     private let coordinateModeLabels = ["Default", "Z→Y", "Y→Z", "None"]
     
@@ -96,7 +100,8 @@ struct MetalKitSceneView: View {
                           deformedSplatCount: $deformedSplatCount,
                           totalSplatCount: $totalSplatCount,
                           saveMaskRequest: $saveMaskRequest,
-                          recommendedMaskPercentage: $recommendedMaskPercentage)
+                          recommendedMaskPercentage: $recommendedMaskPercentage,
+                          useDeviceRotation: $useDeviceRotation)
                 .ignoresSafeArea()
                 .onChange(of: hasClusters) { _, newValue in
                     // Auto-disable cluster colors if clusters become unavailable
@@ -155,6 +160,13 @@ struct MetalKitSceneView: View {
                             .tint(.orange)
                             .disabled(!hasMask)
                             .help(hasMask ? "Only deform moving splats" : "No mask available for this scene")
+                            
+#if os(iOS)
+                        Toggle("Fake Depth", isOn: $useDeviceRotation)
+                            .toggleStyle(.button)
+                            .font(.caption)
+                            .tint(.blue)
+#endif
                             
                         if !hasMask {
                             HStack(spacing: 4) {
@@ -564,10 +576,21 @@ struct MetalKitSceneView: View {
         @Binding var totalSplatCount: Int
         @Binding var saveMaskRequest: Bool
         @Binding var recommendedMaskPercentage: Double?
+        @Binding var useDeviceRotation: Bool
         
         class Coordinator: NSObject {
             var renderer: MetalKitSceneRenderer?
             var startCameraDistance: Float = 0.0
+            
+#if os(iOS)
+            lazy var motionManager: CMMotionManager = {
+                let manager = CMMotionManager()
+                manager.deviceMotionUpdateInterval = 1.0 / 60.0
+                return manager
+            }()
+            var initialAttitude: CMAttitude?
+#endif
+            
             var selectedClusterIDBinding: Binding<Int32>?
             var hasClustersBinding: Binding<Bool>?
             var hasMaskBinding: Binding<Bool>?
@@ -1125,6 +1148,41 @@ struct MetalKitSceneView: View {
                 context.coordinator.renderer?.saveRecommendedMaskPercentage(maskThreshold)
                 DispatchQueue.main.async {
                     self.saveMaskRequest = false
+                }
+            }
+            
+            if useDeviceRotation {
+                if !context.coordinator.motionManager.isDeviceMotionActive {
+                    context.coordinator.initialAttitude = nil
+                    context.coordinator.motionManager.startDeviceMotionUpdates(to: .main) { motion, error in
+                        guard let motion = motion, let renderer = context.coordinator.renderer else { return }
+                        if context.coordinator.initialAttitude == nil {
+                            // Copy initial attitude to anchor the view 
+                            context.coordinator.initialAttitude = motion.attitude.copy() as? CMAttitude
+                        }
+                        if let initial = context.coordinator.initialAttitude {
+                            // currentAttitude is a copy so that multiply by inverse does not mutate the motion property itself
+                            let currentAttitude = motion.attitude.copy() as! CMAttitude
+                            currentAttitude.multiply(byInverseOf: initial)
+                            
+                            // Map attitude to small display rotation delta (Pitch inverted depending on use case)
+                            let pitch = Float(currentAttitude.pitch) * 0.8
+                            let roll = Float(currentAttitude.roll) * 0.8
+                            let yaw = Float(currentAttitude.yaw) * 0.8
+                            
+                            // We might need to adjust mapping depending on physical orientation
+                            renderer.devicePitch = -pitch 
+                            renderer.deviceYaw = roll
+                            renderer.deviceRoll = -yaw
+                        }
+                    }
+                }
+            } else {
+                if context.coordinator.motionManager.isDeviceMotionActive {
+                    context.coordinator.motionManager.stopDeviceMotionUpdates()
+                    context.coordinator.renderer?.devicePitch = 0
+                    context.coordinator.renderer?.deviceRoll = 0
+                    context.coordinator.renderer?.deviceYaw = 0
                 }
             }
             
