@@ -161,12 +161,10 @@ struct MetalKitSceneView: View {
                             .disabled(!hasMask)
                             .help(hasMask ? "Only deform moving splats" : "No mask available for this scene")
                             
-#if os(iOS)
                         Toggle("Fake Depth", isOn: $useDeviceRotation)
                             .toggleStyle(.button)
                             .font(.caption)
                             .tint(.blue)
-#endif
                             
                         if !hasMask {
                             HStack(spacing: 4) {
@@ -945,16 +943,83 @@ struct MetalKitSceneView: View {
                     self.saveMaskRequest = false
                 }
             }
-            
+
+            // Sync fake depth toggle to InteractiveMTKView for arrow key control
+            if let interactiveView = view as? InteractiveMTKView {
+                interactiveView.useDeviceRotation = useDeviceRotation
+                if useDeviceRotation {
+                    interactiveView.startDisplayLink()
+                } else {
+                    interactiveView.stopDisplayLink()
+                    interactiveView.targetPitch = 0
+                    interactiveView.targetYaw = 0
+                    context.coordinator.renderer?.devicePitch = 0
+                    context.coordinator.renderer?.deviceRoll = 0
+                    context.coordinator.renderer?.deviceYaw = 0
+                }
+            }
+
             updateView(context.coordinator)
         }
-        
+
         // Custom MTKView subclass to handle Mouse/Trackpad events
         class InteractiveMTKView: MTKView {
             weak var renderer: MetalKitSceneRenderer?
             weak var coordinator: Coordinator?
-            
+            var useDeviceRotation: Bool = false
+
+            // Smooth fake-depth: track target angles and interpolate
+            var targetPitch: Float = 0
+            var targetYaw: Float = 0
+            private var displayLink: CVDisplayLink?
+
             override var acceptsFirstResponder: Bool { true }
+
+            func startDisplayLink() {
+                guard displayLink == nil else { return }
+                CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+                guard let displayLink else { return }
+                CVDisplayLinkSetOutputHandler(displayLink) { [weak self] _, _, _, _, _ in
+                    self?.interpolateRotation()
+                    return kCVReturnSuccess
+                }
+                CVDisplayLinkStart(displayLink)
+            }
+
+            func stopDisplayLink() {
+                if let dl = displayLink {
+                    CVDisplayLinkStop(dl)
+                    displayLink = nil
+                }
+            }
+
+            private func interpolateRotation() {
+                guard let renderer = renderer else { return }
+                let smoothing: Float = 0.08
+                renderer.devicePitch += (targetPitch - renderer.devicePitch) * smoothing
+                renderer.deviceYaw += (targetYaw - renderer.deviceYaw) * smoothing
+            }
+
+            // Arrow keys simulate device tilt (fake depth) on macOS
+            override func keyDown(with event: NSEvent) {
+                guard useDeviceRotation, renderer != nil else {
+                    super.keyDown(with: event)
+                    return
+                }
+                let step: Float = 0.05
+                switch event.keyCode {
+                case 126: // Up arrow — tilt device up (pitch)
+                    targetPitch += step
+                case 125: // Down arrow — tilt device down (pitch)
+                    targetPitch -= step
+                case 123: // Left arrow — tilt device left (yaw)
+                    targetYaw -= step
+                case 124: // Right arrow — tilt device right (yaw)
+                    targetYaw += step
+                default:
+                    super.keyDown(with: event)
+                }
+            }
             
             // Click: Pick cluster (works in any color mode)
             override func mouseDown(with event: NSEvent) {
