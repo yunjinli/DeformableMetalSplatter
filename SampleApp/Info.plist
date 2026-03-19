@@ -12,6 +12,8 @@
 		<dict/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Camera access is required for AR visualization.</string>
+	<string>Camera access is required for AR visualization and eye tracking.</string>
+	<key>NSFaceTrackingUsageDescription</key>
+	<string>Face tracking is used for eye-gaze based instance selection.</string>
 </dict>
 </plist>

@@ -23,6 +23,8 @@
 		617E50C92B314C4800F99766 /* PLYIO in Frameworks */ = {isa = PBXBuildFile; productRef = 617E50C82B314C4800F99766 /* PLYIO */; };
 		617E50CB2B314C4800F99766 /* SplatIO in Frameworks */ = {isa = PBXBuildFile; productRef = 617E50CA2B314C4800F99766 /* SplatIO */; };
 		AA000001CLIP00000001 /* CLIPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000001CLIP00000002 /* CLIPService.swift */; };
+		AA000002EYETRK00001 /* EyeTrackingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000002EYETRK00002 /* EyeTrackingService.swift */; };
+		AA000003HANDTRK0001 /* HandTrackingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000003HANDTRK0002 /* HandTrackingService.swift */; };
 
 /* End PBXBuildFile section */
 
@@ -42,6 +44,8 @@
 		61791E142B42294700302B57 /* MetalKitSceneView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MetalKitSceneView.swift; sourceTree = "<group>"; };
 		617E50B02B314BE200F99766 /* MetalSplatter SampleApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MetalSplatter SampleApp.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA000001CLIP00000002 /* CLIPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIPService.swift; sourceTree = "<group>"; };
+		AA000002EYETRK00002 /* EyeTrackingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EyeTrackingService.swift; sourceTree = "<group>"; };
+		AA000003HANDTRK0002 /* HandTrackingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandTrackingService.swift; sourceTree = "<group>"; };
 
 /* End PBXFileReference section */
 
@@ -63,6 +67,8 @@
 			isa = PBXGroup;
 			children = (
 				AA000001CLIP00000002 /* CLIPService.swift */,
+				AA000002EYETRK00002 /* EyeTrackingService.swift */,
+				AA000003HANDTRK0002 /* HandTrackingService.swift */,
 				61791DDB2B4154FB00302B57 /* ModelIdentifier.swift */,
 				61791DDE2B4154FB00302B57 /* ModelRenderer.swift */,
 				61791DDA2B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift */,
@@ -219,6 +225,8 @@
 				61791E162B42297B00302B57 /* MetalKitSceneView.swift in Sources */,
 				610347DC2B46875A00693CE3 /* ContentStageConfiguration.swift in Sources */,
 				AA000001CLIP00000001 /* CLIPService.swift in Sources */,
+				AA000002EYETRK00001 /* EyeTrackingService.swift in Sources */,
+				AA000003HANDTRK0001 /* HandTrackingService.swift in Sources */,
 
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -4,12 +4,20 @@ import SwiftUI
 import MetalKit
 #if os(iOS)
 import CoreMotion
+import ARKit
 #endif
 
 #if os(macOS)
 private typealias ViewRepresentable = NSViewRepresentable
 #elseif os(iOS)
 private typealias ViewRepresentable = UIViewRepresentable
+
+extension Notification.Name {
+    static let eyeTrackingBlinkSelect = Notification.Name("eyeTrackingBlinkSelect")
+    static let handTrackingSelect = Notification.Name("handTrackingSelect")
+    static let handTrackingExplode = Notification.Name("handTrackingExplode")
+    static let handTrackingEdgeRotate = Notification.Name("handTrackingEdgeRotate")
+}
 #endif
 
 
@@ -63,438 +71,544 @@ struct MetalKitSceneView: View {
     @State private var deformedSplatCount: Int = 0
     @State private var totalSplatCount: Int = 0
     @State private var useDeviceRotation: Bool = false
-    
+
+    // Eye / head tracking
+    #if os(iOS)
+    @StateObject private var eyeTrackingService = EyeTrackingService()
+    @State private var eyeTrackingEnabled: Bool = false
+    // Hand tracking
+    @StateObject private var handTrackingService = HandTrackingService()
+    @State private var handTrackingEnabled: Bool = false
+    #endif
+
     private let coordinateModeLabels = ["Default", "Z→Y", "Y→Z", "None"]
     
+    @ViewBuilder
+    private var topControlsBar: some View {
+        HStack(spacing: 8) {
+            Toggle("Manual", isOn: $isManualTime)
+                .toggleStyle(.button)
+                .font(.caption)
+
+            Toggle("Mask Static", isOn: $useMaskedDeformation)
+                .toggleStyle(.button)
+                .font(.caption)
+                .tint(.orange)
+                .disabled(!hasMask)
+                .help(hasMask ? "Only deform moving splats" : "No mask available for this scene")
+
+            Toggle("Fake Depth", isOn: $useDeviceRotation)
+                .toggleStyle(.button)
+                .font(.caption)
+                .tint(.blue)
+
+            #if os(iOS)
+            if EyeTrackingService.isSupported {
+                Toggle("Head Tracking", isOn: Binding(
+                    get: { eyeTrackingEnabled },
+                    set: { newValue in
+                        eyeTrackingEnabled = newValue
+                        if newValue { handTrackingEnabled = false }
+                    }
+                ))
+                    .toggleStyle(.button)
+                    .font(.caption)
+                    .tint(.purple)
+                    .disabled(!hasClusters)
+                if eyeTrackingEnabled {
+                    Button("Re-center") {
+                        eyeTrackingService.recenter()
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.caption)
+                    .tint(.purple)
+                }
+            }
+            Toggle("Hand Mode", isOn: Binding(
+                get: { handTrackingEnabled },
+                set: { newValue in
+                    handTrackingEnabled = newValue
+                    if newValue { eyeTrackingEnabled = false }
+                }
+            ))
+                .toggleStyle(.button)
+                .font(.caption)
+                .tint(.mint)
+                .disabled(!hasClusters)
+            #endif
+
+            if !hasMask {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text("No mask.bin")
+                }
+                .font(.caption)
+                .foregroundColor(.yellow)
+            }
+
+            if useMaskedDeformation {
+                Text(String(format: "%.0f%%", maskThreshold))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.orange)
+                    .frame(width: 44, alignment: .trailing)
+                Slider(value: $maskThreshold, in: 0...100)
+                    .accentColor(.orange)
+                    .frame(maxWidth: 120)
+                Button(action: {
+                    saveMaskRequest = true
+                }) {
+                    Image(systemName: "square.and.arrow.down")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.orange)
+                .help("Save current threshold to mask.json")
+            }
+
+            if isManualTime {
+                Text(String(format: "%.2f", time))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, alignment: .trailing)
+
+                Slider(value: $time, in: 0...1)
+                    .accentColor(.blue)
+            } else {
+                Spacer()
+            }
+
+            if selectedClusterID >= 0 || selectedClusterCount > 0 {
+                Button("Show All") {
+                    selectedClusterID = -1
+                    selectedClusterCount = 0
+                    isSelectingMode = false
+                    deleteSelected = false
+                    queryText = ""
+                    queryTopResult = ""
+                    queryStatusText = ""
+                }
+                .buttonStyle(.bordered)
+                .font(.caption)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+        .cornerRadius(8)
+    }
+
+    @ViewBuilder
+    private var deformFPSOverlay: some View {
+        if !isManualTime || time > 0.01 {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(String(format: "Deformation: %.1f FPS", deformFPS))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.black.opacity(0.6))
+                    .cornerRadius(4)
+                if totalSplatCount > 0 {
+                    Text("\(deformedSplatCount) / \(totalSplatCount) splats")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color.black.opacity(0.6))
+                        .cornerRadius(4)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .padding(.top, 60)
+            .padding(.trailing, 16)
+        }
+    }
+
+    @ViewBuilder
+    private var collapsibleControls: some View {
+        VStack(spacing: 8) {
+            visualizationToggles
+            coordinateSystemPicker
+            selectionControls
+            clipEncodingControls
+            clipSearchControls
+        }
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+
+    @ViewBuilder
+    private var visualizationToggles: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Toggle("Cluster Colors", isOn: Binding(
+                    get: { showClusterColors },
+                    set: { newValue in
+                        showClusterColors = newValue
+                        if newValue { showDepthVisualization = false; showMask = false }
+                    }
+                ))
+                .toggleStyle(.button)
+                .font(.caption)
+                .disabled(!hasClusters)
+
+                Toggle("Show Dynamic Splats", isOn: Binding(
+                    get: { showMask },
+                    set: { newValue in
+                        showMask = newValue
+                        if newValue { showDepthVisualization = false; showClusterColors = false }
+                    }
+                ))
+                .toggleStyle(.button)
+                .font(.caption)
+                .disabled(!hasMask)
+
+                Toggle("Depth", isOn: Binding(
+                    get: { showDepthVisualization },
+                    set: { newValue in
+                        showDepthVisualization = newValue
+                        if newValue { showClusterColors = false; showMask = false }
+                    }
+                ))
+                .toggleStyle(.button)
+                .font(.caption)
+            }
+
+            if !hasClusters {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                    Text("clusters.bin not found")
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                .font(.caption2)
+            }
+
+            if !hasCLIPModels {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("CoreML models not found - semantic search unavailable")
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                .font(.caption2)
+            }
+        }
+        .padding(8)
+        .background(.ultraThinMaterial)
+        .cornerRadius(8)
+    }
+
+    @ViewBuilder
+    private var coordinateSystemPicker: some View {
+        HStack {
+            Text("Axis:")
+                .font(.caption)
+                .foregroundStyle(.white)
+
+            Picker("", selection: $coordinateMode) {
+                ForEach(0..<coordinateModeLabels.count, id: \.self) { index in
+                    Text(coordinateModeLabels[index]).tag(index)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 200)
+        }
+        .padding(8)
+        .background(.ultraThinMaterial)
+        .cornerRadius(8)
+    }
+
+    @ViewBuilder
+    private var selectionControls: some View {
+        HStack(spacing: 8) {
+            if isSelectingMode {
+                Text("\(selectedClusterCount) selected")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.white)
+
+                Button("Confirm") {
+                    isSelectingMode = false
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                .font(.caption)
+
+                Button("Delete") {
+                    isSelectingMode = false
+                    deleteSelected = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .font(.caption)
+
+                Button("Cancel") {
+                    isSelectingMode = false
+                    selectedClusterCount = 0
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+                .font(.caption)
+            } else if selectedClusterCount > 0 {
+                Text("\(deleteSelected ? "Hiding" : "Showing") \(selectedClusterCount) clusters")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.8))
+
+                Button("Edit") {
+                    isSelectingMode = true
+                    deleteSelected = false
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
+                .font(.caption)
+
+            } else if selectedClusterID >= 0 {
+                Text("Cluster: \(selectedClusterID)")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.white)
+            } else {
+                Button("Object Selection") {
+                    isSelectingMode = true
+                    selectedClusterID = -1
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
+                .font(.caption)
+                .disabled(!hasClusters)
+            }
+        }
+        .padding(8)
+        .background(.ultraThinMaterial)
+        .cornerRadius(8)
+    }
+
+    @ViewBuilder
+    private var clipEncodingControls: some View {
+        HStack(spacing: 6) {
+            Toggle("Mask", isOn: $useMaskedCrops)
+                .toggleStyle(.button)
+                .font(.caption)
+                .disabled(isEncodingClusters)
+                .help("Mask out non-cluster pixels before CLIP encoding")
+
+            Button(action: {
+                captureRequest = true
+                isEncodingClusters = true
+                encodingProgressText = "Starting…"
+            }) {
+                HStack(spacing: 4) {
+                    if isEncodingClusters {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                    } else {
+                        Image(systemName: hasClipFeatures ? "checkmark.circle.fill" : "brain")
+                    }
+                    if isEncodingClusters && !encodingProgressText.isEmpty {
+                        Text(encodingProgressText)
+                    } else if hasClipFeatures {
+                        Text("Re-encode Clusters")
+                    } else {
+                        Text("Encode Clusters (CLIP)")
+                    }
+                }
+            }
+            .buttonStyle(.bordered)
+            .tint(hasClipFeatures ? .green : .blue)
+            .disabled(isEncodingClusters || !hasClusters || !hasCLIPModels)
+        }
+        .padding(8)
+        .background(.ultraThinMaterial)
+        .cornerRadius(8)
+    }
+
+    @ViewBuilder
+    private var clipSearchControls: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.white.opacity(0.6))
+                TextField("Search clusters...", text: $queryText)
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(.white)
+                    .disabled(!hasCLIPModels)
+                    .onSubmit {
+                        searchRequest = true
+                    }
+
+                Button("Search") {
+                    searchRequest = true
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
+                .font(.caption)
+                .disabled(queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !hasCLIPModels)
+
+                if !queryText.isEmpty {
+                    Button(action: {
+                        queryText = ""
+                        selectedClusterID = -1
+                        selectedClusterCount = 0
+                        isSelectingMode = false
+                        queryTopResult = ""
+                        queryStatusText = ""
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial)
+            .cornerRadius(8)
+
+            HStack(spacing: 6) {
+                Text("Top K")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.6))
+                Button(action: { if queryTopK > 1 { queryTopK -= 1 } }) {
+                    Image(systemName: "minus.circle")
+                        .foregroundStyle(.white.opacity(queryTopK > 1 ? 0.8 : 0.3))
+                }
+                .buttonStyle(.plain)
+                .disabled(queryTopK <= 1)
+                Text("\(queryTopK)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.white)
+                    .frame(width: 24, alignment: .center)
+                Button(action: { queryTopK += 1 }) {
+                    Image(systemName: "plus.circle")
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10)
+
+            if !queryStatusText.isEmpty {
+                Text(queryStatusText)
+                    .font(.caption2)
+                    .foregroundStyle(.yellow.opacity(0.9))
+            }
+
+            if !queryTopResult.isEmpty {
+                Text(queryTopResult)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+        }
+        .padding(8)
+        .background(.ultraThinMaterial)
+        .cornerRadius(8)
+    }
+
+    @ViewBuilder
+    private var encodingStatusOverlay: some View {
+        if isEncodingClusters {
+            VStack(spacing: 12) {
+                ProgressView()
+                    .scaleEffect(1.5)
+                    .tint(.white)
+                Text(encodingProgressText.isEmpty ? "Starting…" : encodingProgressText)
+                    .font(.system(.headline, design: .rounded))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .animation(.easeInOut(duration: 0.15), value: encodingProgressText)
+            }
+            .padding(.horizontal, 32)
+            .padding(.vertical, 24)
+            .background(.ultraThinMaterial)
+            .background(Color.black.opacity(0.4))
+            .cornerRadius(16)
+            .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            .animation(.easeInOut(duration: 0.25), value: isEncodingClusters)
+        }
+    }
+
+    #if os(iOS)
+    @ViewBuilder
+    private func trackingCursorView(x: CGFloat, y: CGFloat, isActive: Bool, color: Color) -> some View {
+        Circle()
+            .fill(isActive ? Color.red.opacity(0.8) : color.opacity(0.6))
+            .frame(width: 24, height: 24)
+            .overlay(
+                Circle()
+                    .stroke(Color.white, lineWidth: 2)
+            )
+            .shadow(color: .black.opacity(0.5), radius: 4)
+            .position(x: x, y: y)
+            .allowsHitTesting(false)
+            .animation(.easeOut(duration: 0.05), value: x)
+            .animation(.easeOut(duration: 0.05), value: y)
+    }
+    #endif
+
+    private func metalViewLayer() -> some View {
+        MetalView(modelIdentifier: modelIdentifier,
+                  manualTime: isManualTime ? time : nil,
+                  showClusterColors: showClusterColors,
+                  showMask: showMask,
+                  showDepthVisualization: showDepthVisualization,
+                  selectedClusterID: $selectedClusterID,
+                  coordinateMode: coordinateMode,
+                  hasClusters: $hasClusters,
+                  hasMask: $hasMask,
+                  hasCLIPModels: $hasCLIPModels,
+                  useMaskedCrops: useMaskedCrops,
+                  averageMaskedAndUnmasked: averageMaskedAndUnmasked,
+                  isSelectingMode: $isSelectingMode,
+                  selectedClusterCount: $selectedClusterCount,
+                  deleteSelected: $deleteSelected,
+                  captureRequest: $captureRequest,
+                  isEncodingClusters: $isEncodingClusters,
+                  hasClipFeatures: $hasClipFeatures,
+                  queryText: $queryText,
+                  encodingProgressText: $encodingProgressText,
+                  searchRequest: $searchRequest,
+                  queryStatusText: $queryStatusText,
+                  queryTopK: $queryTopK,
+                  useMaskedDeformation: useMaskedDeformation,
+                  maskThreshold: maskThreshold,
+                  deformFPS: $deformFPS,
+                  renderFPS: $renderFPS,
+                  deformedSplatCount: $deformedSplatCount,
+                  totalSplatCount: $totalSplatCount,
+                  saveMaskRequest: $saveMaskRequest,
+                  recommendedMaskPercentage: $recommendedMaskPercentage,
+                  useDeviceRotation: $useDeviceRotation)
+        .ignoresSafeArea()
+        .onChange(of: hasClusters) { _, newValue in
+            if !newValue && showClusterColors {
+                showClusterColors = false
+            }
+        }
+        .onChange(of: recommendedMaskPercentage) { _, newValue in
+            if let newPercentage = newValue {
+                maskThreshold = newPercentage
+            }
+        }
+        .onChange(of: hasMask) { _, newValue in
+            if !newValue && useMaskedDeformation {
+                useMaskedDeformation = false
+            }
+        }
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
-                // Background Metal view
-                MetalView(modelIdentifier: modelIdentifier,
-                          manualTime: isManualTime ? time : nil,
-                          showClusterColors: showClusterColors,
-                          showMask: showMask,
-                          showDepthVisualization: showDepthVisualization,
-                          selectedClusterID: $selectedClusterID,
-                          coordinateMode: coordinateMode,
-                          hasClusters: $hasClusters,
-                          hasMask: $hasMask,
-                          hasCLIPModels: $hasCLIPModels,
-                          useMaskedCrops: useMaskedCrops,
-                          averageMaskedAndUnmasked: averageMaskedAndUnmasked,
-                          isSelectingMode: $isSelectingMode,
-                          selectedClusterCount: $selectedClusterCount,
-                          deleteSelected: $deleteSelected,
-                          captureRequest: $captureRequest,
-                          isEncodingClusters: $isEncodingClusters,
-                          hasClipFeatures: $hasClipFeatures,
-                          queryText: $queryText,
-                          encodingProgressText: $encodingProgressText,
-                          searchRequest: $searchRequest,
-                          queryStatusText: $queryStatusText,
-                          queryTopK: $queryTopK,
-                          useMaskedDeformation: useMaskedDeformation,
-                          maskThreshold: maskThreshold,
-                          deformFPS: $deformFPS,
-                          renderFPS: $renderFPS,
-                          deformedSplatCount: $deformedSplatCount,
-                          totalSplatCount: $totalSplatCount,
-                          saveMaskRequest: $saveMaskRequest,
-                          recommendedMaskPercentage: $recommendedMaskPercentage,
-                          useDeviceRotation: $useDeviceRotation)
-                .ignoresSafeArea()
-                .onChange(of: hasClusters) { _, newValue in
-                    // Auto-disable cluster colors if clusters become unavailable
-                    if !newValue && showClusterColors {
-                        showClusterColors = false
-                    }
-                }
-                .onChange(of: recommendedMaskPercentage) { _, newValue in
-                    if let newPercentage = newValue {
-                        maskThreshold = newPercentage
-                    }
-                }
-                .onChange(of: hasMask) { _, newValue in
-                    if !newValue && useMaskedDeformation {
-                        useMaskedDeformation = false
-                    }
-                }
-                
-                // Deformation FPS overlay in top right corner (only when deforming)
-                if !isManualTime || time > 0.01 {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(String(format: "Deformation: %.1f FPS", deformFPS))
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.black.opacity(0.6))
-                            .cornerRadius(4)
-                        if totalSplatCount > 0 {
-                            Text("\(deformedSplatCount) / \(totalSplatCount) splats")
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.8))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(Color.black.opacity(0.6))
-                                .cornerRadius(4)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .padding(.top, 60)
-                    .padding(.trailing, 16)
-                }
-                
+                metalViewLayer()
+
+                deformFPSOverlay
+
                 // UI Overlay
                 VStack(spacing: 8) {
-                    // Time slider with manual toggle inline + Show All on right
-                    HStack(spacing: 8) {
-                        Toggle("Manual", isOn: $isManualTime)
-                            .toggleStyle(.button)
-                            .font(.caption)
-                        
-                        // Masked deformation toggle
-                        Toggle("Mask Static", isOn: $useMaskedDeformation)
-                            .toggleStyle(.button)
-                            .font(.caption)
-                            .tint(.orange)
-                            .disabled(!hasMask)
-                            .help(hasMask ? "Only deform moving splats" : "No mask available for this scene")
-                            
-                        Toggle("Fake Depth", isOn: $useDeviceRotation)
-                            .toggleStyle(.button)
-                            .font(.caption)
-                            .tint(.blue)
-                            
-                        if !hasMask {
-                            HStack(spacing: 4) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                Text("No mask.bin")
-                            }
-                            .font(.caption)
-                            .foregroundColor(.yellow)
-                        }
+                    topControlsBar
 
-                        if useMaskedDeformation {
-                            Text(String(format: "%.0f%%", maskThreshold))
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.orange)
-                                .frame(width: 44, alignment: .trailing)
-                            Slider(value: $maskThreshold, in: 0...100)
-                                .accentColor(.orange)
-                                .frame(maxWidth: 120)
-                            Button(action: {
-                                saveMaskRequest = true
-                            }) {
-                                Image(systemName: "square.and.arrow.down")
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.orange)
-                            .help("Save current threshold to mask.json")
-                        }
-
-                        if isManualTime {
-                            Text(String(format: "%.2f", time))
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.white)
-                                .frame(width: 40, alignment: .trailing)
-                            
-                            Slider(value: $time, in: 0...1)
-                                .accentColor(.blue)
-                        } else {
-                            Spacer()
-                        }
-                        
-                        if selectedClusterID >= 0 || selectedClusterCount > 0 {
-                            Button("Show All") {
-                                selectedClusterID = -1
-                                selectedClusterCount = 0
-                                isSelectingMode = false
-                                deleteSelected = false
-                                queryText = ""
-                                queryTopResult = ""
-                                queryStatusText = ""
-                            }
-                            .buttonStyle(.bordered)
-                            .font(.caption)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(8)
-                    
-                    // Collapsible controls section
                     if showControls {
-                        VStack(spacing: 8) {
-                            VStack(spacing: 4) {
-                                HStack {
-                                    Toggle("Cluster Colors", isOn: Binding(
-                                        get: { showClusterColors },
-                                        set: { newValue in
-                                            showClusterColors = newValue
-                                            if newValue { showDepthVisualization = false; showMask = false }
-                                        }
-                                    ))
-                                    .toggleStyle(.button)
-                                    .font(.caption)
-                                    .disabled(!hasClusters)
-
-                                    Toggle("Show Dynamic Splats", isOn: Binding(
-                                        get: { showMask },
-                                        set: { newValue in
-                                            showMask = newValue
-                                            if newValue { showDepthVisualization = false; showClusterColors = false }
-                                        }
-                                    ))
-                                    .toggleStyle(.button)
-                                    .font(.caption)
-                                    .disabled(!hasMask)
-
-                                    Toggle("Depth", isOn: Binding(
-                                        get: { showDepthVisualization },
-                                        set: { newValue in
-                                            showDepthVisualization = newValue
-                                            if newValue { showClusterColors = false; showMask = false }
-                                        }
-                                    ))
-                                    .toggleStyle(.button)
-                                    .font(.caption)
-                                }
-                                
-                                // Warning when clusters.bin is not available
-                                if !hasClusters {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "exclamationmark.triangle.fill")
-                                            .foregroundStyle(.yellow)
-                                        Text("clusters.bin not found")
-                                            .foregroundStyle(.white.opacity(0.8))
-                                    }
-                                    .font(.caption2)
-                                }
-                                
-                                // Warning when CoreML models are not available
-                                if !hasCLIPModels {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "exclamationmark.triangle.fill")
-                                            .foregroundStyle(.orange)
-                                        Text("CoreML models not found - semantic search unavailable")
-                                            .foregroundStyle(.white.opacity(0.8))
-                                    }
-                                    .font(.caption2)
-                                }
-                            }
-                            .padding(8)
-                            .background(.ultraThinMaterial)
-                            .cornerRadius(8)
-                            
-                            // Coordinate system picker
-                            HStack {
-                                Text("Axis:")
-                                    .font(.caption)
-                                    .foregroundStyle(.white)
-                                
-                                Picker("", selection: $coordinateMode) {
-                                    ForEach(0..<coordinateModeLabels.count, id: \.self) { index in
-                                        Text(coordinateModeLabels[index]).tag(index)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-                                .frame(maxWidth: 200)
-                            }
-                            .padding(8)
-                            .background(.ultraThinMaterial)
-                            .cornerRadius(8)
-                            
-                            // Multi-cluster selection controls
-                            HStack(spacing: 8) {
-                                if isSelectingMode {
-                                    // In selection mode
-                                    Text("\(selectedClusterCount) selected")
-                                        .font(.system(.caption, design: .monospaced))
-                                        .foregroundStyle(.white)
-                                    
-                                    Button("Confirm") {
-                                        isSelectingMode = false
-                                        // Mode will be set to 2 (confirmed) in MetalView
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(.green)
-                                    .font(.caption)
-                                    
-                                    Button("Delete") {
-                                        isSelectingMode = false
-                                        // Mode will be set to 3 (delete/hide) in MetalView
-                                        deleteSelected = true
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(.orange)
-                                    .font(.caption)
-                                    
-                                    Button("Cancel") {
-                                        isSelectingMode = false
-                                        selectedClusterCount = 0
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .tint(.red)
-                                    .font(.caption)
-                                } else if selectedClusterCount > 0 {
-                                    // Confirmed/deleted selection active
-                                    Text("\(deleteSelected ? "Hiding" : "Showing") \(selectedClusterCount) clusters")
-                                        .font(.caption)
-                                        .foregroundStyle(.white.opacity(0.8))
-                                    
-                                    Button("Edit") {
-                                        isSelectingMode = true
-                                        deleteSelected = false
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .tint(.blue)
-                                    .font(.caption)
-                                    
-                                } else if selectedClusterID >= 0 {
-                                    // Single cluster selection (legacy)
-                                    Text("Cluster: \(selectedClusterID)")
-                                        .font(.system(.caption, design: .monospaced))
-                                        .foregroundStyle(.white)
-                                } else {
-                                    // No selection
-                                    Button("Object Selection") {
-                                        isSelectingMode = true
-                                        selectedClusterID = -1  // Clear single selection
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .tint(.blue)
-                                    .font(.caption)
-                                    .disabled(!hasClusters)
-                                }
-                            }
-                            .padding(8)
-                            .background(.ultraThinMaterial)
-                            .cornerRadius(8)
-                            
-                            // Encode Clusters with CLIP
-                            HStack(spacing: 6) {
-                                Toggle("Mask", isOn: $useMaskedCrops)
-                                    .toggleStyle(.button)
-                                    .font(.caption)
-                                    .disabled(isEncodingClusters)
-                                    .help("Mask out non-cluster pixels before CLIP encoding")
-                                
-                                // Note: averageMaskedAndUnmasked can be enabled programmatically if needed
-                                
-                                Button(action: {
-                                    captureRequest = true
-                                    isEncodingClusters = true
-                                    encodingProgressText = "Starting…"
-                                }) {
-                                    HStack(spacing: 4) {
-                                        if isEncodingClusters {
-                                            ProgressView()
-                                                .scaleEffect(0.7)
-                                        } else {
-                                            Image(systemName: hasClipFeatures ? "checkmark.circle.fill" : "brain")
-                                        }
-                                        if isEncodingClusters && !encodingProgressText.isEmpty {
-                                            Text(encodingProgressText)
-                                        } else if hasClipFeatures {
-                                            Text("Re-encode Clusters")
-                                        } else {
-                                            Text("Encode Clusters (CLIP)")
-                                        }
-                                    }
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(hasClipFeatures ? .green : .blue)
-                                .disabled(isEncodingClusters || !hasClusters || !hasCLIPModels)
-                            }
-                            .padding(8)
-                            .background(.ultraThinMaterial)
-                            .cornerRadius(8)
-                            
-                            // CLIP text query (always visible, enabled after encoding)
-                            VStack(spacing: 6) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "magnifyingglass")
-                                        .foregroundStyle(.white.opacity(0.6))
-                                    TextField("Search clusters...", text: $queryText)
-                                        .textFieldStyle(.plain)
-                                        .foregroundStyle(.white)
-                                        .disabled(!hasCLIPModels)
-                                        .onSubmit {
-                                            searchRequest = true
-                                        }
-                                    
-                                    Button("Search") {
-                                        searchRequest = true
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .tint(.blue)
-                                    .font(.caption)
-                                    .disabled(queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !hasCLIPModels)
-                                    
-                                    if !queryText.isEmpty {
-                                        Button(action: {
-                                            queryText = ""
-                                            selectedClusterID = -1
-                                            selectedClusterCount = 0
-                                            isSelectingMode = false
-                                            queryTopResult = ""
-                                            queryStatusText = ""
-                                        }) {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .foregroundStyle(.white.opacity(0.6))
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(.ultraThinMaterial)
-                                .cornerRadius(8)
-                                
-                                // Top-K selector
-                                HStack(spacing: 6) {
-                                    Text("Top K")
-                                        .font(.caption2)
-                                        .foregroundStyle(.white.opacity(0.6))
-                                    Button(action: { if queryTopK > 1 { queryTopK -= 1 } }) {
-                                        Image(systemName: "minus.circle")
-                                            .foregroundStyle(.white.opacity(queryTopK > 1 ? 0.8 : 0.3))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(queryTopK <= 1)
-                                    Text("\(queryTopK)")
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.white)
-                                        .frame(width: 24, alignment: .center)
-                                    Button(action: { queryTopK += 1 }) {
-                                        Image(systemName: "plus.circle")
-                                            .foregroundStyle(.white.opacity(0.8))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                .padding(.horizontal, 10)
-                                
-                                if !queryStatusText.isEmpty {
-                                    Text(queryStatusText)
-                                        .font(.caption2)
-                                        .foregroundStyle(.yellow.opacity(0.9))
-                                }
-                                
-                                if !queryTopResult.isEmpty {
-                                    Text(queryTopResult)
-                                        .font(.caption2)
-                                        .foregroundStyle(.white.opacity(0.7))
-                                }
-                            }
-                            .padding(8)
-                            .background(.ultraThinMaterial)
-                            .cornerRadius(8)
-                        }
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        collapsibleControls
                     }
-                    
+
                     // Toggle to show/hide extra controls
                     Button(action: {
                         withAnimation(.easeInOut(duration: 0.2)) {
@@ -515,33 +629,115 @@ struct MetalKitSceneView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .padding()
-                
-                // Prominent encoding status overlay (center of screen)
-                if isEncodingClusters {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                            .tint(.white)
-                        Text(encodingProgressText.isEmpty ? "Starting…" : encodingProgressText)
-                            .font(.system(.headline, design: .rounded))
-                            .foregroundStyle(.white)
-                            .multilineTextAlignment(.center)
-                            .animation(.easeInOut(duration: 0.15), value: encodingProgressText)
+
+                encodingStatusOverlay
+
+                // Head tracking cursor overlay
+                #if os(iOS)
+                if eyeTrackingEnabled && eyeTrackingService.isRunning {
+                    trackingCursorView(
+                        x: eyeTrackingService.gazePoint.x * geometry.size.width,
+                        y: eyeTrackingService.gazePoint.y * geometry.size.height,
+                        isActive: eyeTrackingService.isBlinking,
+                        color: .purple
+                    )
+                }
+                // Hand tracking cursor overlay
+                if handTrackingEnabled && handTrackingService.isRunning && handTrackingService.handDetected {
+                    trackingCursorView(
+                        x: handTrackingService.cursorPoint.x * geometry.size.width,
+                        y: handTrackingService.cursorPoint.y * geometry.size.height,
+                        isActive: handTrackingService.isPinching,
+                        color: .mint
+                    )
+                    // Open palm indicator
+                    if handTrackingService.isOpenPalm {
+                        Image(systemName: "hand.raised.fill")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.red.opacity(0.8))
+                            .position(
+                                x: handTrackingService.cursorPoint.x * geometry.size.width,
+                                y: handTrackingService.cursorPoint.y * geometry.size.height - 30
+                            )
+                            .allowsHitTesting(false)
                     }
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 24)
-                    .background(.ultraThinMaterial)
-                    .background(Color.black.opacity(0.4))
-                    .cornerRadius(16)
-                    .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                    .animation(.easeInOut(duration: 0.25), value: isEncodingClusters)
+                }
+                #endif
+            }
+            #if os(iOS)
+            .onChange(of: eyeTrackingEnabled) { _, enabled in
+                if enabled {
+                    if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                        eyeTrackingService.interfaceOrientation = scene.interfaceOrientation
+                    }
+                    eyeTrackingService.start()
+                    if !isSelectingMode && selectedClusterCount == 0 {
+                        isSelectingMode = true
+                        selectedClusterID = -1
+                    }
+                } else {
+                    eyeTrackingService.stop()
                 }
             }
+            .onChange(of: eyeTrackingService.didBlink) { _, blinked in
+                guard blinked, eyeTrackingEnabled, isSelectingMode else { return }
+                NotificationCenter.default.post(
+                    name: .eyeTrackingBlinkSelect,
+                    object: nil,
+                    userInfo: [
+                        "gazeX": eyeTrackingService.gazePoint.x,
+                        "gazeY": eyeTrackingService.gazePoint.y
+                    ]
+                )
+            }
+            .onChange(of: handTrackingEnabled) { _, enabled in
+                if enabled {
+                    handTrackingService.start()
+                    if !isSelectingMode && selectedClusterCount == 0 {
+                        isSelectingMode = true
+                        selectedClusterID = -1
+                    }
+                } else {
+                    handTrackingService.stop()
+                }
+            }
+            .onChange(of: handTrackingService.didDoublePinch) { _, pinched in
+                guard pinched, handTrackingEnabled, isSelectingMode else { return }
+                NotificationCenter.default.post(
+                    name: .handTrackingSelect,
+                    object: nil,
+                    userInfo: [
+                        "cursorX": handTrackingService.cursorPoint.x,
+                        "cursorY": handTrackingService.cursorPoint.y
+                    ]
+                )
+            }
+            .onChange(of: handTrackingService.didOpenPalm) { _, opened in
+                guard opened, handTrackingEnabled else { return }
+                NotificationCenter.default.post(
+                    name: .handTrackingExplode,
+                    object: nil,
+                    userInfo: [
+                        "cursorX": handTrackingService.cursorPoint.x,
+                        "cursorY": handTrackingService.cursorPoint.y
+                    ]
+                )
+            }
+            .onReceive(handTrackingService.$edgeRotation) { rotation in
+                guard handTrackingEnabled, rotation != .zero else { return }
+                NotificationCenter.default.post(
+                    name: .handTrackingEdgeRotate,
+                    object: nil,
+                    userInfo: [
+                        "rotX": rotation.x,
+                        "rotY": rotation.y
+                    ]
+                )
+            }
+            #endif
         }
     }
-    
+
     private struct MetalView: ViewRepresentable {
         var modelIdentifier: ModelIdentifier?
         var manualTime: Float?
@@ -614,6 +810,145 @@ struct MetalKitSceneView: View {
             /// Cached CLIP features to survive renderer/view lifecycle resets
             var cachedClusterIDs: [Int32] = []
             var cachedClusterFeatures: [[Float]] = []
+
+#if os(iOS)
+            /// Notification observers for tracking gestures
+            private var blinkObserver: NSObjectProtocol?
+            private var handSelectObserver: NSObjectProtocol?
+            private var handExplodeObserver: NSObjectProtocol?
+            private var edgeRotateObserver: NSObjectProtocol?
+            var deleteSelectedBinding: Binding<Bool>?
+
+            func startListeningForGestures() {
+                guard blinkObserver == nil else { return }
+                blinkObserver = NotificationCenter.default.addObserver(
+                    forName: .eyeTrackingBlinkSelect,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] notification in
+                    self?.handleCursorSelect(notification, xKey: "gazeX", yKey: "gazeY", label: "HeadTracking")
+                }
+                handSelectObserver = NotificationCenter.default.addObserver(
+                    forName: .handTrackingSelect,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] notification in
+                    self?.handleCursorSelect(notification, xKey: "cursorX", yKey: "cursorY", label: "HandTracking")
+                }
+                handExplodeObserver = NotificationCenter.default.addObserver(
+                    forName: .handTrackingExplode,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] notification in
+                    self?.handleExplode(notification)
+                }
+                edgeRotateObserver = NotificationCenter.default.addObserver(
+                    forName: .handTrackingEdgeRotate,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] notification in
+                    self?.handleEdgeRotate(notification)
+                }
+            }
+
+            /// Shared handler: pick cluster at normalized cursor position and toggle selection.
+            private func handleCursorSelect(_ notification: Notification, xKey: String, yKey: String, label: String) {
+                guard let renderer = renderer,
+                      let userInfo = notification.userInfo,
+                      let cursorX = userInfo[xKey] as? CGFloat,
+                      let cursorY = userInfo[yKey] as? CGFloat else { return }
+
+                let drawableSize = renderer.drawableSize
+                let screenPoint = CGPoint(
+                    x: cursorX * drawableSize.width,
+                    y: cursorY * drawableSize.height
+                )
+
+                if let clusterID = renderer.pickClusterAt(screenPoint) {
+                    if isSelectingModeBinding?.wrappedValue == true {
+                        renderer.toggleClusterSelection(clusterID)
+                        selectedClusterCountBinding?.wrappedValue = renderer.selectedClusterCount
+                        print("[\(label)] Selected cluster \(clusterID) at (\(String(format: "%.2f", cursorX)), \(String(format: "%.2f", cursorY)))")
+                    }
+                }
+            }
+
+            /// Open palm: toggle cluster visibility at cursor.
+            /// If the cluster is already hidden, make it reappear.
+            /// If visible, hide it ("explode").
+            private func handleExplode(_ notification: Notification) {
+                guard let renderer = renderer,
+                      let userInfo = notification.userInfo,
+                      let cursorX = userInfo["cursorX"] as? CGFloat,
+                      let cursorY = userInfo["cursorY"] as? CGFloat else { return }
+
+                let drawableSize = renderer.drawableSize
+                let screenPoint = CGPoint(
+                    x: cursorX * drawableSize.width,
+                    y: cursorY * drawableSize.height
+                )
+
+                // Are we currently in hide mode with hidden clusters?
+                let isHideMode = (deleteSelectedBinding?.wrappedValue == true) && renderer.selectedClusterCount > 0
+
+                if isHideMode {
+                    // In hide mode: try to pick from hidden clusters.
+                    // Temporarily show all to pick, then re-hide.
+                    let savedMode = renderer.selectionMode
+                    let savedClusters = renderer.selectedClusters
+                    renderer.selectionMode = 0  // show all for picking
+
+                    if let clusterID = renderer.pickClusterAt(screenPoint) {
+                        let uid = UInt32(clusterID)
+                        if savedClusters.contains(uid) {
+                            // This cluster is hidden — remove from selection to make it reappear
+                            renderer.selectionMode = savedMode
+                            renderer.toggleClusterSelection(clusterID) // removes it
+                            selectedClusterCountBinding?.wrappedValue = renderer.selectedClusterCount
+                            if renderer.selectedClusterCount == 0 {
+                                // No more hidden clusters — exit hide mode
+                                deleteSelectedBinding?.wrappedValue = false
+                                renderer.selectionMode = 0
+                            }
+                            print("[HandTracking] Restored cluster \(clusterID)")
+                            return
+                        }
+                    }
+                    // Didn't hit a hidden cluster — restore state and fall through to hide
+                    renderer.selectionMode = savedMode
+                }
+
+                // Normal case: pick and hide
+                guard let clusterID = renderer.pickClusterAt(screenPoint) else { return }
+
+                if !renderer.selectedClusters.contains(UInt32(clusterID)) {
+                    renderer.toggleClusterSelection(clusterID)
+                }
+                renderer.selectionMode = 3  // hide/delete mode
+                selectedClusterCountBinding?.wrappedValue = renderer.selectedClusterCount
+                deleteSelectedBinding?.wrappedValue = true
+                isSelectingModeBinding?.wrappedValue = false
+                print("[HandTracking] Exploded cluster \(clusterID) at (\(String(format: "%.2f", cursorX)), \(String(format: "%.2f", cursorY)))")
+            }
+
+            /// Edge rotation: adjust renderer yaw/pitch when hand cursor is near screen edge.
+            private func handleEdgeRotate(_ notification: Notification) {
+                guard let renderer = renderer,
+                      let userInfo = notification.userInfo,
+                      let rotX = userInfo["rotX"] as? CGFloat,
+                      let rotY = userInfo["rotY"] as? CGFloat else { return }
+                renderer.yaw += Float(rotX)
+                renderer.pitch += Float(rotY)
+            }
+
+            deinit {
+                for observer in [blinkObserver, handSelectObserver, handExplodeObserver, edgeRotateObserver] {
+                    if let obs = observer {
+                        NotificationCenter.default.removeObserver(obs)
+                    }
+                }
+            }
+#endif
             
             func processQuery() {
                 guard let text = queryTextBinding?.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
@@ -782,6 +1117,9 @@ struct MetalKitSceneView: View {
             coordinator.deformedSplatCountBinding = $deformedSplatCount
             coordinator.totalSplatCountBinding = $totalSplatCount
             coordinator.recommendedMaskPercentageBinding = $recommendedMaskPercentage
+            #if os(iOS)
+            coordinator.deleteSelectedBinding = $deleteSelected
+            #endif
             return coordinator
         }
         
@@ -1138,10 +1476,11 @@ struct MetalKitSceneView: View {
             
             loadModel(renderer, coordinator: context.coordinator)
             setupCLIPCallbacks(renderer: renderer, coordinator: context.coordinator)
-            
+            context.coordinator.startListeningForGestures()
+
             return metalKitView
         }
-        
+
         func updateUIView(_ view: MTKView, context: Context) {
             context.coordinator.renderer?.manualTime = manualTime
             context.coordinator.hasClustersBinding = $hasClusters
