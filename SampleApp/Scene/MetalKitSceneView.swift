@@ -11,11 +11,11 @@ import ARKit
 private typealias ViewRepresentable = NSViewRepresentable
 #elseif os(iOS)
 private typealias ViewRepresentable = UIViewRepresentable
+#endif
 
 extension Notification.Name {
     static let headTrackingRotate = Notification.Name("headTrackingRotate")
 }
-#endif
 
 
 struct MetalKitSceneView: View {
@@ -70,10 +70,8 @@ struct MetalKitSceneView: View {
     @State private var useDeviceRotation: Bool = false
 
     // Head tracking (rotates scene via front-camera face pose)
-    #if os(iOS)
     @StateObject private var eyeTrackingService = EyeTrackingService()
     @State private var eyeTrackingEnabled: Bool = false
-    #endif
 
     private let coordinateModeLabels = ["Default", "Z→Y", "Y→Z", "None"]
     
@@ -91,7 +89,6 @@ struct MetalKitSceneView: View {
                 .disabled(!hasMask)
                 .help(hasMask ? "Only deform moving splats" : "No mask available for this scene")
 
-            #if os(iOS)
             Toggle("Fake Depth", isOn: Binding(
                 get: { useDeviceRotation },
                 set: { newValue in
@@ -102,14 +99,7 @@ struct MetalKitSceneView: View {
                 .toggleStyle(.button)
                 .font(.caption)
                 .tint(.blue)
-            #else
-            Toggle("Fake Depth", isOn: $useDeviceRotation)
-                .toggleStyle(.button)
-                .font(.caption)
-                .tint(.blue)
-            #endif
 
-            #if os(iOS)
             if EyeTrackingService.isSupported {
                 Toggle("Head Tracking", isOn: Binding(
                     get: { eyeTrackingEnabled },
@@ -130,7 +120,6 @@ struct MetalKitSceneView: View {
                     .tint(.purple)
                 }
             }
-            #endif
 
             if !hasMask {
                 HStack(spacing: 4) {
@@ -611,7 +600,6 @@ struct MetalKitSceneView: View {
 
                 // Head tracking cursor overlay
             }
-            #if os(iOS)
             .onChange(of: eyeTrackingEnabled) { _, enabled in
                 if enabled {
                     eyeTrackingService.start()
@@ -635,7 +623,6 @@ struct MetalKitSceneView: View {
                     ]
                 )
             }
-            #endif
         }
     }
 
@@ -712,12 +699,13 @@ struct MetalKitSceneView: View {
             var cachedClusterIDs: [Int32] = []
             var cachedClusterFeatures: [[Float]] = []
 
-#if os(iOS)
             /// Notification observer for head-tracking scene rotation.
             private var headRotateObserver: NSObjectProtocol?
+#if os(iOS)
             var deleteSelectedBinding: Binding<Bool>?
+#endif
 
-            func startListeningForGestures() {
+            func startListeningForHeadTracking() {
                 guard headRotateObserver == nil else { return }
                 headRotateObserver = NotificationCenter.default.addObserver(
                     forName: .headTrackingRotate,
@@ -745,7 +733,6 @@ struct MetalKitSceneView: View {
                     NotificationCenter.default.removeObserver(obs)
                 }
             }
-#endif
             
             func processQuery() {
                 guard let text = queryTextBinding?.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
@@ -998,10 +985,11 @@ struct MetalKitSceneView: View {
             
             loadModel(renderer, coordinator: context.coordinator)
             setupCLIPCallbacks(renderer: renderer, coordinator: context.coordinator)
-            
+            context.coordinator.startListeningForHeadTracking()
+
             return metalKitView
         }
-        
+
         func updateNSView(_ view: MTKView, context: Context) {
             context.coordinator.renderer?.manualTime = manualTime
             context.coordinator.selectedClusterIDBinding = $selectedClusterID
@@ -1094,12 +1082,16 @@ struct MetalKitSceneView: View {
                 }
             }
 
-            // Sync fake depth toggle to InteractiveMTKView for arrow key control
+            // Sync fake depth toggle to InteractiveMTKView for arrow key control.
+            // Only reset the renderer's device rotation on the off-edge so that
+            // head tracking (which drives the same values) isn't clobbered on each
+            // SwiftUI update.
             if let interactiveView = view as? InteractiveMTKView {
+                let wasActive = interactiveView.useDeviceRotation
                 interactiveView.useDeviceRotation = useDeviceRotation
                 if useDeviceRotation {
                     interactiveView.startDisplayLink()
-                } else {
+                } else if wasActive {
                     interactiveView.stopDisplayLink()
                     interactiveView.targetPitch = 0
                     interactiveView.targetYaw = 0
@@ -1273,7 +1265,7 @@ struct MetalKitSceneView: View {
             
             loadModel(renderer, coordinator: context.coordinator)
             setupCLIPCallbacks(renderer: renderer, coordinator: context.coordinator)
-            context.coordinator.startListeningForGestures()
+            context.coordinator.startListeningForHeadTracking()
 
             return metalKitView
         }
