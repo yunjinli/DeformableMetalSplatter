@@ -111,6 +111,18 @@ https://github.com/user-attachments/assets/5721c452-af9a-44d6-a1c5-3395be2fcfc0
 
 https://github.com/user-attachments/assets/b18e0a2b-4fe0-4200-9553-523d58b503f3
 
+## Fake Depth AR Feature 
+
+This features allows to use the imu of the device (only works on iPad and iPhone) or optionally head tracking to rotate the view of the scene around. This feature is inspired by [World Labs Designer Ian Curtis' post](https://www.linkedin.com/feed/update/urn:li:activity:7420155034342117376/). 
+
+We show an example of the IMU version below : 
+
+https://github.com/user-attachments/assets/aafaf617-ef9f-4d7f-b5a0-f695d617f9eb
+
+To use : first center the scene at the viewpoint you want to choose to start, then : use ```Fake Depth``` button to use the IMU for rotating around the scene or use ```Head Tracking``` button to use head tracking for rotating around the scene. 
+
+https://github.com/user-attachments/assets/aeb49ffa-dc6e-47f0-88ab-f2b46bbf78da
+
 
 
 # Acknowledgments

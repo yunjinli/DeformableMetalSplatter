@@ -53,7 +53,7 @@ struct ContentView: View {
         VStack {
             Spacer()
 
-            Text("Deformable MetalSplatter SampleApp")
+            Text("DeformableMetalSplatter")
 
             Spacer()
             

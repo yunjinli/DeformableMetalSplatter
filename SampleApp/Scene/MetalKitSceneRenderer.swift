@@ -35,6 +35,11 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     // Pan xy
     var panX: Float = 0.0
     var panY: Float = 0.0
+    
+    // Device rotation offsets (e.g. from gyroscope)
+    public var devicePitch: Float = 0.0
+    public var deviceRoll: Float = 0.0
+    public var deviceYaw: Float = 0.0
     public var manualTime: Float? = nil
     public var showClusterColors: Bool = false
     public var showMask: Bool = false  // Show dynamic vs static splats
@@ -223,9 +228,15 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                                                              nearZ: 0.1,
                                                              farZ: 100.0)
 
-        let rotationMatrixY = matrix4x4_rotation(radians: yaw, axis: SIMD3<Float>(0, 1, 0))
-        let rotationMatrixX = matrix4x4_rotation(radians: pitch, axis: SIMD3<Float>(1, 0, 0))
-        let rotationMatrix = rotationMatrixX * rotationMatrixY
+        let totalYaw = yaw + deviceYaw
+        let totalPitch = pitch + devicePitch
+        
+        let rotationMatrixY = matrix4x4_rotation(radians: totalYaw, axis: SIMD3<Float>(0, 1, 0))
+        let rotationMatrixX = matrix4x4_rotation(radians: totalPitch, axis: SIMD3<Float>(1, 0, 0))
+        let rotationMatrixZ = matrix4x4_rotation(radians: deviceRoll, axis: SIMD3<Float>(0, 0, 1))
+        
+        // Z (roll) applied last so it rolls the view, then X (pitch), then Y (yaw)
+        let rotationMatrix = rotationMatrixZ * rotationMatrixX * rotationMatrixY
         
         let translationMatrix = matrix4x4_translation(panX, panY, cameraDistance)
         

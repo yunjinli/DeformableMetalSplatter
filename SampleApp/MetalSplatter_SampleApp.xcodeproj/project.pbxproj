@@ -23,6 +23,7 @@
 		617E50C92B314C4800F99766 /* PLYIO in Frameworks */ = {isa = PBXBuildFile; productRef = 617E50C82B314C4800F99766 /* PLYIO */; };
 		617E50CB2B314C4800F99766 /* SplatIO in Frameworks */ = {isa = PBXBuildFile; productRef = 617E50CA2B314C4800F99766 /* SplatIO */; };
 		AA000001CLIP00000001 /* CLIPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000001CLIP00000002 /* CLIPService.swift */; };
+		AA000002EYETRK00001 /* EyeTrackingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000002EYETRK00002 /* EyeTrackingService.swift */; };
 
 /* End PBXBuildFile section */
 
@@ -40,8 +41,9 @@
 		61791E0E2B41685800302B57 /* MetalKitSceneRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MetalKitSceneRenderer.swift; sourceTree = "<group>"; };
 		61791E112B416DCF00302B57 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		61791E142B42294700302B57 /* MetalKitSceneView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MetalKitSceneView.swift; sourceTree = "<group>"; };
-		617E50B02B314BE200F99766 /* MetalSplatter SampleApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MetalSplatter SampleApp.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		617E50B02B314BE200F99766 /* DeformableMetalSplatter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "DeformableMetalSplatter.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA000001CLIP00000002 /* CLIPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIPService.swift; sourceTree = "<group>"; };
+		AA000002EYETRK00002 /* EyeTrackingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EyeTrackingService.swift; sourceTree = "<group>"; };
 
 /* End PBXFileReference section */
 
@@ -63,6 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				AA000001CLIP00000002 /* CLIPService.swift */,
+				AA000002EYETRK00002 /* EyeTrackingService.swift */,
 				61791DDB2B4154FB00302B57 /* ModelIdentifier.swift */,
 				61791DDE2B4154FB00302B57 /* ModelRenderer.swift */,
 				61791DDA2B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift */,
@@ -124,7 +127,7 @@
 		61E3FD832AE5CB0200032652 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				617E50B02B314BE200F99766 /* MetalSplatter SampleApp.app */,
+				617E50B02B314BE200F99766 /* DeformableMetalSplatter.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -132,9 +135,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		617E50AF2B314BE200F99766 /* MetalSplatter SampleApp */ = {
+		617E50AF2B314BE200F99766 /* DeformableMetalSplatter */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 617E50C12B314BE300F99766 /* Build configuration list for PBXNativeTarget "MetalSplatter SampleApp" */;
+			buildConfigurationList = 617E50C12B314BE300F99766 /* Build configuration list for PBXNativeTarget "DeformableMetalSplatter" */;
 			buildPhases = (
 				617E50AC2B314BE200F99766 /* Sources */,
 				617E50AD2B314BE200F99766 /* Frameworks */,
@@ -145,14 +148,14 @@
 			);
 			dependencies = (
 			);
-			name = "MetalSplatter SampleApp";
+			name = "DeformableMetalSplatter";
 			packageProductDependencies = (
 				617E50C82B314C4800F99766 /* PLYIO */,
 				617E50CA2B314C4800F99766 /* SplatIO */,
 				61791DFF2B415D3F00302B57 /* MetalSplatter */,
 			);
-			productName = "MetalSplatter SampleApp";
-			productReference = 617E50B02B314BE200F99766 /* MetalSplatter SampleApp.app */;
+			productName = "DeformableMetalSplatter";
+			productReference = 617E50B02B314BE200F99766 /* DeformableMetalSplatter.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -186,7 +189,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				617E50AF2B314BE200F99766 /* MetalSplatter SampleApp */,
+				617E50AF2B314BE200F99766 /* DeformableMetalSplatter */,
 			);
 		};
 /* End PBXProject section */
@@ -219,6 +222,7 @@
 				61791E162B42297B00302B57 /* MetalKitSceneView.swift in Sources */,
 				610347DC2B46875A00693CE3 /* ContentStageConfiguration.swift in Sources */,
 				AA000001CLIP00000001 /* CLIPService.swift in Sources */,
+				AA000002EYETRK00001 /* EyeTrackingService.swift in Sources */,
 
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -246,6 +250,7 @@
 		617E50C22B314BE300F99766 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
@@ -286,6 +291,7 @@
 		617E50C32B314BE300F99766 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
@@ -443,7 +449,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		617E50C12B314BE300F99766 /* Build configuration list for PBXNativeTarget "MetalSplatter SampleApp" */ = {
+		617E50C12B314BE300F99766 /* Build configuration list for PBXNativeTarget "DeformableMetalSplatter" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				617E50C22B314BE300F99766 /* Debug */,
