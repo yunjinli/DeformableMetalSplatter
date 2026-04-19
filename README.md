@@ -121,6 +121,8 @@ https://github.com/user-attachments/assets/aafaf617-ef9f-4d7f-b5a0-f695d617f9eb
 
 To use : first center the scene at the viewpoint you want to choose to start, then : use ```Fake Depth``` button to use the IMU for rotating around the scene or use ```Head Tracking``` button to use head tracking for rotating around the scene. 
 
+https://github.com/user-attachments/assets/aeb49ffa-dc6e-47f0-88ab-f2b46bbf78da
+
 
 
 # Acknowledgments
